@@ -1,0 +1,90 @@
+/* Estilos complementares da Pastoral dos Coroinhas e Acólitos */
+
+:root {
+  --navy-dark: #0F172A;
+  --navy-primary: #1E3A8A;
+  --gold-primary: #D97706;
+  --gold-accent: #F59E0B;
+  --surface-bg: #F8FAFC;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 9999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.6);
+}
+
+@keyframes modalIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-modal-in {
+  animation: modalIn 0.18s ease-out forwards;
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-toast-in {
+  animation: toastIn 0.2s ease-out forwards;
+}
+
+.devotional-pattern {
+  background-image:
+    radial-gradient(circle at 88% 22%, rgba(245, 158, 11, 0.24) 0%, transparent 45%),
+    radial-gradient(circle at 12% 85%, rgba(59, 130, 246, 0.22) 0%, transparent 50%),
+    linear-gradient(135deg, #0F172A 0%, #172554 55%, #1E3A8A 100%);
+}
+
+.user-schedule-card {
+  border-color: #F59E0B !important;
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.28), 0 8px 22px -6px rgba(217, 119, 6, 0.14);
+}
+
+.sidebar-link-active {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.18) 0%, rgba(30, 58, 138, 0.45) 100%);
+  color: #FFFFFF;
+  border-left: 3px solid #F59E0B;
+}
+
+.sidebar-link-active i,
+.sidebar-link-active svg {
+  color: #FBBF24;
+}
+
+.calendar-cell {
+  min-height: 92px;
+}
+
+@media (max-width: 640px) {
+  .calendar-cell {
+    min-height: 64px;
+  }
+}
