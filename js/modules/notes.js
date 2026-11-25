@@ -1,10 +1,14 @@
 /**
- * Módulo 6: Bloco de Notas Multi-Pastoral (Mural Compartilhado)
- * Visibilidade: Toda a Paróquia, Pastorais selecionadas ou Apenas Coordenadores da(s) pastoral(is).
+ * Módulo 6: Bloco de Notas Segmentado por Pastoral (Vínculo N:N Estrito)
+ * - Seleção obrigatória de 1 ou mais pastorais (listando apenas pastorais que o usuário participa/coordena;
+ *   "Toda a Paróquia" exclusivo da Coordenação Geral).
+ * - Visibilidade estrita: usuário só visualiza notas vinculadas a pelo menos uma de suas pastorais
+ *   ou "Toda a Paróquia" (exceção: Coordenação Geral vê todas).
  */
 
 import { dataService } from '../services/dataService.js';
 import {
+  canManageAnyOfPastorals,
   canManagePastoral,
   closeModal,
   escapeHtml,
@@ -12,30 +16,26 @@ import {
   getMemberPastoralIds,
   isAnyCoordinator,
   isGeneralAdmin,
+  isPastoralScopedItemVisible,
   openModal,
   refreshIcons,
-  renderPastoralPill,
+  renderPastoralPillsList,
   showToast,
 } from '../utils/helpers.js';
 
-let noteFilter = 'all';
+let notePastoralFilter = 'all';
 
-function isNoteVisibleToUser(note, user, pastorals) {
+function isNoteVisibleStrict(note, user, pastorals) {
   if (isGeneralAdmin(user)) return true;
   if (note.authorId === user.id) return true;
-
-  const targets = note.visiblePastoralIds || ['all'];
-  const userPastoralIds = new Set(getMemberPastoralIds(user, pastorals));
-
-  if (targets.includes('all')) {
-    if (note.coordinatorsOnly) return isAnyCoordinator(user);
-    return true;
-  }
+  if (!isPastoralScopedItemVisible(note.pastoralIds, user, pastorals)) return false;
 
   if (note.coordinatorsOnly) {
-    return targets.some((pid) => canManagePastoral(user, pid));
+    const pids = note.pastoralIds || ['all'];
+    if (pids.includes('all')) return isAnyCoordinator(user);
+    return pids.some((pid) => canManagePastoral(user, pid));
   }
-  return targets.some((pid) => userPastoralIds.has(pid));
+  return true;
 }
 
 export function renderNotes(container, { user }) {
@@ -46,11 +46,16 @@ export function renderNotes(container, { user }) {
   const accessibleIds = getMemberPastoralIds(user, pastorals);
   const accessiblePastorals = pastorals.filter((p) => accessibleIds.includes(p.id));
 
-  const visibleNotes = dataService.getNotes().filter((n) => isNoteVisibleToUser(n, user, pastorals));
+  if (notePastoralFilter !== 'all' && notePastoralFilter !== 'mine' && !accessibleIds.includes(notePastoralFilter)) {
+    notePastoralFilter = 'all';
+  }
+
+  const visibleNotes = dataService.getNotes().filter((n) => isNoteVisibleStrict(n, user, pastorals));
   const filtered = visibleNotes.filter((n) => {
-    if (noteFilter === 'all') return true;
-    if (noteFilter === 'mine') return n.authorId === user.id;
-    return (n.visiblePastoralIds || []).includes(noteFilter);
+    if (notePastoralFilter === 'all') return true;
+    if (notePastoralFilter === 'mine') return n.authorId === user.id;
+    const pids = n.pastoralIds || ['all'];
+    return pids.includes('all') || pids.includes(notePastoralFilter);
   });
 
   container.innerHTML = `
@@ -59,7 +64,7 @@ export function renderNotes(container, { user }) {
         <div>
           <h3 class="text-xl font-extrabold text-[#3E2723]">Bloco de Notas &amp; Orientações</h3>
           <p class="text-sm text-[#6D4C41] mt-0.5">
-            Mural compartilhado de checklists, repertórios, leituras e orientações por pastoral.
+            Mural segmentado por pastoral. Você visualiza apenas notas das suas pastorais e da paróquia.
           </p>
         </div>
         <button id="btn-new-note" type="button"
@@ -69,21 +74,22 @@ export function renderNotes(container, { user }) {
         </button>
       </div>
 
+      <!-- Filtro por Pastoral -->
       <div class="flex items-center gap-2 flex-wrap">
         <button type="button" data-note-filter="all"
           class="px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition ${
-            noteFilter === 'all' ? 'bg-[#3E2723] text-white border-[#3E2723]' : 'bg-white text-[#5D4037] border-[#E6DACE] hover:bg-[#FDFBF7]'
-          }">Todas visíveis</button>
+            notePastoralFilter === 'all' ? 'bg-[#3E2723] text-white border-[#3E2723]' : 'bg-white text-[#5D4037] border-[#E6DACE] hover:bg-[#FDFBF7]'
+          }">Todas as minhas pastorais</button>
         <button type="button" data-note-filter="mine"
           class="px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition ${
-            noteFilter === 'mine' ? 'bg-[#3E2723] text-white border-[#3E2723]' : 'bg-white text-[#5D4037] border-[#E6DACE] hover:bg-[#FDFBF7]'
+            notePastoralFilter === 'mine' ? 'bg-[#3E2723] text-white border-[#3E2723]' : 'bg-white text-[#5D4037] border-[#E6DACE] hover:bg-[#FDFBF7]'
           }">Minhas anotações</button>
         ${accessiblePastorals
           .map(
             (p) => `
           <button type="button" data-note-filter="${p.id}"
             class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition ${
-              noteFilter === p.id ? 'bg-[#3E2723] text-white border-[#3E2723]' : 'bg-white text-[#5D4037] border-[#E6DACE] hover:bg-[#FDFBF7]'
+              notePastoralFilter === p.id ? 'bg-[#3E2723] text-white border-[#3E2723]' : 'bg-white text-[#5D4037] border-[#E6DACE] hover:bg-[#FDFBF7]'
             }">
             <span class="w-2 h-2 rounded-full" style="background-color:${escapeHtml(p.color)};"></span>
             ${escapeHtml(p.shortName)}
@@ -99,7 +105,7 @@ export function renderNotes(container, { user }) {
         <div class="bg-white rounded-2xl border border-dashed border-[#D7C4B2] p-10 text-center">
           <i data-lucide="notebook-pen" class="w-10 h-10 text-[#8D6E63] mx-auto mb-3"></i>
           <h4 class="text-base font-bold text-[#3E2723]">Nenhuma anotação encontrada</h4>
-          <p class="text-sm text-[#6D4C41] mt-1">Crie uma nova anotação para compartilhar com sua pastoral.</p>
+          <p class="text-sm text-[#6D4C41] mt-1">Crie uma nova anotação selecionando as pastorais de destino.</p>
         </div>
       `
           : `
@@ -107,21 +113,16 @@ export function renderNotes(container, { user }) {
           ${filtered
             .map((note) => {
               const author = userMap[note.authorId]?.name || 'Membro';
-              const targets = note.visiblePastoralIds || ['all'];
               const canManage =
                 isGeneralAdmin(user) ||
                 note.authorId === user.id ||
-                (!targets.includes('all') && targets.some((pid) => canManagePastoral(user, pid)));
+                canManageAnyOfPastorals(user, note.pastoralIds);
               return `
                 <article class="bg-white rounded-2xl border border-[#E6DACE] p-5 flex flex-col justify-between gap-4 shadow-xs hover:shadow-md transition">
                   <div>
                     <div class="flex items-start justify-between gap-2 mb-3">
                       <div class="flex items-center gap-1.5 flex-wrap">
-                        ${
-                          targets.includes('all')
-                            ? renderPastoralPill(null, { compact: true })
-                            : targets.map((pid) => renderPastoralPill(pastoralMap[pid], { compact: true })).join('')
-                        }
+                        ${renderPastoralPillsList(note.pastoralIds, pastoralMap, { compact: true })}
                         ${
                           note.coordinatorsOnly
                             ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#3E2723] text-amber-300">
@@ -166,7 +167,7 @@ export function renderNotes(container, { user }) {
 
   container.querySelectorAll('[data-note-filter]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      noteFilter = btn.dataset.noteFilter;
+      notePastoralFilter = btn.dataset.noteFilter;
       renderNotes(container, { user });
     });
   });
@@ -195,14 +196,14 @@ export function renderNotes(container, { user }) {
 }
 
 function openNoteModal(existing, user, onSaved) {
-  const pastorals = dataService.getPastorals();
+  const generalAdmin = isGeneralAdmin(user);
+  const pastorals = dataService.getActivePastorals();
   const accessibleIds = getMemberPastoralIds(user, pastorals);
-  const accessiblePastorals = pastorals.filter((p) => accessibleIds.includes(p.id));
-  const initialTargets = existing?.visiblePastoralIds || (isGeneralAdmin(user) ? ['all'] : accessibleIds.slice(0, 1));
-  const initialMode = initialTargets.includes('all') ? 'Todos' : 'Personalizado';
+  const selectablePastorals = pastorals.filter((p) => accessibleIds.includes(p.id));
+  const initialTargets = existing?.pastoralIds || (generalAdmin ? ['all'] : selectablePastorals.slice(0, 1).map((p) => p.id));
 
   openModal({
-    title: existing ? 'Editar Anotação' : 'Nova Anotação no Mural',
+    title: existing ? 'Editar Anotação' : 'Nova Anotação Segmentada',
     bodyHtml: `
       <form id="note-form" class="space-y-4">
         <div>
@@ -217,22 +218,26 @@ function openNoteModal(existing, user, onSaved) {
             class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">${escapeHtml(existing?.content || '')}</textarea>
         </div>
 
-        <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Visibilidade *</label>
-          <select id="note-vis-mode" name="visibilityMode" class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm outline-none focus:border-[#B45309]">
-            <option value="Todos" ${initialMode === 'Todos' ? 'selected' : ''}>Todas as Pastorais (Paroquial)</option>
-            <option value="Personalizado" ${initialMode === 'Personalizado' ? 'selected' : ''}>Pastorais específicas (seleção múltipla)</option>
-          </select>
-        </div>
-
-        <div id="custom-vis-box" class="${initialMode === 'Personalizado' ? '' : 'hidden'} p-3.5 rounded-xl bg-[#FAF6F0] border border-[#E6DACE] space-y-2">
-          <p class="text-xs font-bold text-[#5D4037]">Selecione as pastorais que podem visualizar esta nota:</p>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            ${accessiblePastorals
+        <!-- Seleção Obrigatória N:N de Pastorais -->
+        <div class="p-3.5 rounded-xl bg-[#FAF6F0] border border-[#E6DACE] space-y-2">
+          <label class="block text-xs font-bold uppercase tracking-wider text-[#3E2723]">Pastorais de Destino (Obrigatório) *</label>
+          <p class="text-[11px] text-[#6D4C41]">Apenas membros das pastorais selecionadas visualizarão esta anotação.</p>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+            ${
+              generalAdmin
+                ? `
+              <label class="inline-flex items-center gap-2 text-xs font-extrabold text-[#92400E] cursor-pointer sm:col-span-2">
+                <input id="note-target-all" type="checkbox" name="pastoralIds" value="all" ${initialTargets.includes('all') ? 'checked' : ''} class="rounded text-[#B45309]">
+                Toda a Paróquia (todas as pastorais)
+              </label>
+            `
+                : ''
+            }
+            ${selectablePastorals
               .map(
                 (p) => `
               <label class="inline-flex items-center gap-2 text-xs font-semibold text-[#3E2723] cursor-pointer">
-                <input type="checkbox" name="targetPastorals" value="${p.id}" ${initialTargets.includes(p.id) ? 'checked' : ''} class="rounded text-[#B45309]">
+                <input type="checkbox" class="note-target-pid rounded text-[#B45309]" name="pastoralIds" value="${p.id}" ${initialTargets.includes(p.id) ? 'checked' : ''}>
                 <span class="w-2 h-2 rounded-full" style="background-color:${escapeHtml(p.color)};"></span>
                 ${escapeHtml(p.shortName)}
               </label>
@@ -247,7 +252,7 @@ function openNoteModal(existing, user, onSaved) {
             ? `
           <label class="inline-flex items-center gap-2 text-xs font-bold text-[#5D4037] cursor-pointer">
             <input type="checkbox" name="coordinatorsOnly" ${existing?.coordinatorsOnly ? 'checked' : ''} class="rounded text-[#B45309]">
-            Restringir leitura apenas para Coordenadores
+            Restringir leitura apenas aos Coordenadores das pastorais selecionadas
           </label>
         `
             : ''
@@ -260,36 +265,38 @@ function openNoteModal(existing, user, onSaved) {
       </form>
     `,
     onMount(bodyEl) {
-      const modeSel = bodyEl.querySelector('#note-vis-mode');
-      const customBox = bodyEl.querySelector('#custom-vis-box');
-      modeSel.addEventListener('change', () => {
-        customBox.classList.toggle('hidden', modeSel.value !== 'Personalizado');
-      });
+      const allChk = bodyEl.querySelector('#note-target-all');
+      const pidChks = bodyEl.querySelectorAll('.note-target-pid');
+      if (allChk) {
+        allChk.addEventListener('change', () => {
+          if (allChk.checked) pidChks.forEach((c) => { c.checked = false; });
+        });
+        pidChks.forEach((c) => {
+          c.addEventListener('change', () => {
+            if (c.checked) allChk.checked = false;
+          });
+        });
+      }
 
       bodyEl.querySelector('#cancel-note-btn').addEventListener('click', closeModal);
       bodyEl.querySelector('#note-form').addEventListener('submit', (e) => {
         e.preventDefault();
         const fd = new FormData(e.target);
-        const mode = fd.get('visibilityMode');
-        let visiblePastoralIds = ['all'];
-        if (mode === 'Personalizado') {
-          visiblePastoralIds = fd.getAll('targetPastorals');
-          if (visiblePastoralIds.length === 0) {
-            showToast('Selecione pelo menos uma pastoral.', 'error');
-            return;
-          }
+        const pastoralIds = fd.getAll('pastoralIds');
+        if (pastoralIds.length === 0) {
+          showToast('Selecione obrigatoriamente pelo menos uma pastoral de destino.', 'error');
+          return;
         }
         dataService.saveNote({
           id: existing?.id,
           title: String(fd.get('title')).trim(),
           content: String(fd.get('content')).trim(),
           authorId: existing?.authorId || user.id,
-          visibilityMode: mode,
-          visiblePastoralIds,
+          pastoralIds,
           coordinatorsOnly: fd.get('coordinatorsOnly') === 'on',
         });
         closeModal();
-        showToast(existing ? 'Anotação atualizada!' : 'Anotação publicada no mural!');
+        showToast(existing ? 'Anotação atualizada!' : 'Anotação publicada!');
         onSaved();
       });
     },

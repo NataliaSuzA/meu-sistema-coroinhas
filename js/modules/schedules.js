@@ -1,13 +1,13 @@
 /**
- * Módulo 2: Escalas Multi-Pastoral com Governança & Isolamento
- * - Aba padrão "Minhas Escalas" unifica todas as escalas do usuário com tag colorida da pastoral
- * - Abas dinâmicas apenas das pastorais às quais o usuário tem acesso (Coordenação ou Membro)
- * - Coordenadores só gerenciam (criar/editar/excluir/reatribuir) escalas das pastorais que coordenam
- * - Criação flexível (+ Adicionar Posição): Pastoral (apenas coordenadas) -> Função ativa -> Membro ativo
- * - Permite múltiplas escalas por pessoa, exibindo alerta visual amigável em caso de conflito no mesmo dia/horário
+ * Módulo 2: Escalas Multi-Pastoral com Isolamento Estrito + Aba Padrão "Minhas Datas"
+ * - Aba padrão: "Minhas Datas" (reutiliza renderMyDatesContent com contagem regressiva)
+ * - Usuário só visualiza escalas/abas das pastorais das quais faz parte (Membro ou Coordenador)
+ * - Dentro das suas pastorais, vê a escala completa da equipe para saber com quem vai servir
+ * - Respeita permissão dinâmica 'schedules_manage' da Matriz de Permissões
  */
 
 import { dataService } from '../services/dataService.js';
+import { renderMyDatesContent } from './myDates.js';
 import {
   buildUserTimeSlotIndex,
   canManagePastoral,
@@ -18,10 +18,11 @@ import {
   formatDateBR,
   formatWeekdayBR,
   getCoordinatedPastoralIds,
+  getCountdownBadge,
   getMemberPastoralIds,
   getTodayISO,
+  hasPermission,
   hasTimeConflict,
-  isAnyCoordinator,
   isGeneralAdmin,
   openModal,
   refreshIcons,
@@ -44,20 +45,20 @@ const DEFAULT_LOCATIONS = [
   'Capela Santa Teresinha',
 ];
 
-let activeTab = 'mine';
+let activeTab = 'my_dates';
 
 export function resetSchedulesTab() {
-  activeTab = 'mine';
+  activeTab = 'my_dates';
 }
 
-export function renderSchedules(container, { user, setHeaderContext }) {
+export function renderSchedules(container, { user, setHeaderContext, permissions }) {
   const pastorals = dataService.getPastorals();
   const pastoralMap = Object.fromEntries(pastorals.map((p) => [p.id, p]));
   const coordPastoralIds = getCoordinatedPastoralIds(user, pastorals);
   const accessiblePastoralIds = getMemberPastoralIds(user, pastorals);
   const accessiblePastorals = pastorals.filter((p) => accessiblePastoralIds.includes(p.id));
-  const anyCoord = isAnyCoordinator(user);
   const generalAdmin = isGeneralAdmin(user);
+  const canCreateEdit = hasPermission(user, 'schedules_manage', permissions) && coordPastoralIds.length > 0;
 
   const schedules = dataService
     .getSchedules()
@@ -69,71 +70,65 @@ export function renderSchedules(container, { user, setHeaderContext }) {
   const roleMap = Object.fromEntries(roles.map((r) => [r.id, r]));
   const slotIndex = buildUserTimeSlotIndex(schedules);
 
-  // Valida se a aba ativa continua permitida para o usuário atual
-  if (activeTab !== 'mine' && activeTab !== 'all_managed' && !accessiblePastoralIds.includes(activeTab)) {
-    activeTab = 'mine';
+  if (activeTab !== 'my_dates' && activeTab !== 'all_managed' && !accessiblePastoralIds.includes(activeTab)) {
+    activeTab = 'my_dates';
   }
   if (activeTab === 'all_managed' && !generalAdmin) {
-    activeTab = 'mine';
+    activeTab = 'my_dates';
   }
 
-  // Atualiza cabeçalho interno dinâmico
   const selectedPastoral = pastoralMap[activeTab] || null;
   const dynamicTitle = selectedPastoral ? selectedPastoral.name : 'Visão Geral das Pastorais';
   setHeaderContext?.('Escalas', dynamicTitle);
 
   const tabs = [
-    { id: 'mine', label: 'Minhas Escalas', icon: 'star', managed: false },
+    { id: 'my_dates', label: 'Minhas Datas', icon: 'calendar-clock', managed: false },
     ...(generalAdmin ? [{ id: 'all_managed', label: 'Todas as Pastorais', icon: 'layers', managed: true }] : []),
     ...accessiblePastorals.map((p) => ({
       id: p.id,
       label: p.shortName,
       color: p.color,
-      managed: canManagePastoral(user, p.id),
+      managed: canCreateEdit && canManagePastoral(user, p.id),
     })),
   ];
 
-  const filtered = schedules.filter((sch) => {
-    if (activeTab === 'mine') {
-      return (sch.assignments || []).some((a) => a.userId === user.id);
-    }
-    if (activeTab === 'all_managed') {
-      return true;
-    }
-    return sch.pastoralId === activeTab || (sch.assignments || []).some((a) => a.pastoralId === activeTab);
-  });
-
-  // Substituições pendentes estritamente nas pastorais que o usuário coordena
-  const pendingSubCount = schedules.reduce(
-    (sum, s) =>
-      sum +
-      (s.assignments || []).filter(
-        (a) => a.substitutionRequested && canManagePastoral(user, a.pastoralId || s.pastoralId),
-      ).length,
+  const myAssignmentsCount = schedules.reduce(
+    (sum, s) => sum + (s.assignments || []).filter((a) => a.userId === user.id).length,
     0,
   );
 
+  const filtered = schedules.filter((sch) => {
+    if (activeTab === 'all_managed') return true;
+    return sch.pastoralId === activeTab || (sch.assignments || []).some((a) => a.pastoralId === activeTab);
+  });
+
+  const pendingSubCount = canCreateEdit
+    ? schedules.reduce(
+        (sum, s) =>
+          sum +
+          (s.assignments || []).filter(
+            (a) => a.substitutionRequested && canManagePastoral(user, a.pastoralId || s.pastoralId),
+          ).length,
+        0,
+      )
+    : 0;
+
   container.innerHTML = `
     <div class="space-y-6">
-      <!-- Barra superior com título dinâmico -->
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <span class="inline-flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider text-[#B45309] bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full mb-1.5">
             <i data-lucide="layers" class="w-3 h-3"></i>
             ${escapeHtml(dynamicTitle)}
           </span>
-          <h3 class="text-xl font-extrabold text-[#3E2723]">Escalas Litúrgicas e Ministeriais</h3>
+          <h3 class="text-xl font-extrabold text-[#3E2723]">Escalas das Minhas Pastorais</h3>
           <p class="text-sm text-[#6D4C41] mt-0.5">
-            ${
-              anyCoord
-                ? 'Você visualiza suas escalas pessoais e gerencia apenas as pastorais em que atua como Coordenador(a).'
-                : 'Acompanhe todas as suas escalas unificadas entre as pastorais em que participa.'
-            }
+            Você visualiza apenas as escalas das pastorais em que participa, com a equipe completa de cada celebração.
           </p>
         </div>
 
         ${
-          anyCoord
+          canCreateEdit
             ? `
           <button id="btn-new-schedule" type="button"
             class="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#3E2723] hover:bg-[#5D4037] text-white text-sm font-semibold shadow-sm transition shrink-0">
@@ -146,28 +141,28 @@ export function renderSchedules(container, { user, setHeaderContext }) {
       </div>
 
       ${
-        anyCoord && pendingSubCount > 0
+        pendingSubCount > 0
           ? `
         <div class="rounded-2xl bg-amber-50 border border-amber-300 px-4 py-3.5 flex items-center gap-3">
           <div class="w-9 h-9 rounded-xl bg-[#D97706] text-white flex items-center justify-center shrink-0">
             <i data-lucide="alert-triangle" class="w-4 h-4"></i>
           </div>
           <p class="text-sm text-[#4E342E] font-medium">
-            Há <strong>${pendingSubCount}</strong> ${pendingSubCount === 1 ? 'solicitação de substituição pendente' : 'solicitações de substituição pendentes'} nas pastorais sob sua coordenação. Clique em <strong>Reatribuir</strong> na posição correspondente.
+            Há <strong>${pendingSubCount}</strong> ${pendingSubCount === 1 ? 'solicitação de substituição pendente' : 'solicitações de substituição pendentes'} nas pastorais sob sua coordenação.
           </p>
         </div>
       `
           : ''
       }
 
-      <!-- Abas Dinâmicas por Pastoral -->
+      <!-- Abas Isoladas por Pastoral -->
       <div class="flex items-center gap-2 overflow-x-auto pb-1 custom-scrollbar">
         ${tabs
           .map((t) => {
             const isActive = activeTab === t.id;
             const count =
-              t.id === 'mine'
-                ? schedules.filter((s) => (s.assignments || []).some((a) => a.userId === user.id)).length
+              t.id === 'my_dates'
+                ? myAssignmentsCount
                 : t.id === 'all_managed'
                   ? schedules.length
                   : schedules.filter((s) => s.pastoralId === t.id || (s.assignments || []).some((a) => a.pastoralId === t.id)).length;
@@ -186,7 +181,7 @@ export function renderSchedules(container, { user, setHeaderContext }) {
                 }
                 ${escapeHtml(t.label)}
                 ${
-                  t.id !== 'mine' && t.id !== 'all_managed' && !generalAdmin
+                  t.id !== 'my_dates' && t.id !== 'all_managed' && !generalAdmin
                     ? `<span class="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded font-bold ${
                         t.managed
                           ? isActive
@@ -195,7 +190,7 @@ export function renderSchedules(container, { user, setHeaderContext }) {
                           : isActive
                             ? 'bg-white/15 text-amber-100'
                             : 'bg-[#F5EFE6] text-[#6D4C41]'
-                      }">${t.managed ? 'Gestão' : 'Membro'}</span>`
+                      }">${t.managed ? 'Gestão' : 'Equipe'}</span>`
                     : ''
                 }
                 <span class="px-1.5 py-0.5 rounded-md text-[11px] font-bold ${
@@ -207,73 +202,84 @@ export function renderSchedules(container, { user, setHeaderContext }) {
           .join('')}
       </div>
 
-      <!-- Lista de Escalas -->
-      ${
-        filtered.length === 0
-          ? `
-        <div class="bg-white rounded-2xl border border-dashed border-[#D7C4B2] p-10 text-center">
-          <i data-lucide="calendar-x" class="w-10 h-10 text-[#8D6E63] mx-auto mb-3"></i>
-          <h4 class="text-base font-bold text-[#3E2723]">Nenhuma escala encontrada nesta aba</h4>
-          <p class="text-sm text-[#6D4C41] mt-1">
-            ${activeTab === 'mine' ? 'Você ainda não está escalado(a) em nenhuma celebração.' : 'Nenhuma escala cadastrada para esta pastoral ainda.'}
-          </p>
-        </div>
-      `
-          : `
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          ${filtered
-            .map((sch) => renderScheduleCard(sch, { user, userMap, roleMap, pastoralMap, slotIndex }))
-            .join('')}
-        </div>
-      `
-      }
+      <!-- Conteúdo da Aba -->
+      <div id="schedules-tab-body"></div>
     </div>
   `;
+
+  const tabBody = container.querySelector('#schedules-tab-body');
+
+  if (activeTab === 'my_dates') {
+    renderMyDatesContent(tabBody, {
+      user,
+      compactHeader: true,
+      onChanged: () => renderSchedules(container, { user, setHeaderContext, permissions }),
+    });
+  } else if (filtered.length === 0) {
+    tabBody.innerHTML = `
+      <div class="bg-white rounded-2xl border border-dashed border-[#D7C4B2] p-10 text-center">
+        <i data-lucide="calendar-x" class="w-10 h-10 text-[#8D6E63] mx-auto mb-3"></i>
+        <h4 class="text-base font-bold text-[#3E2723]">Nenhuma escala cadastrada para esta pastoral ainda</h4>
+      </div>
+    `;
+  } else {
+    tabBody.innerHTML = `
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        ${filtered
+          .map((sch) => renderScheduleCard(sch, { user, canCreateEdit, userMap, roleMap, pastoralMap, slotIndex }))
+          .join('')}
+      </div>
+    `;
+  }
 
   container.querySelectorAll('[data-tab]').forEach((btn) => {
     btn.addEventListener('click', () => {
       activeTab = btn.dataset.tab;
-      renderSchedules(container, { user, setHeaderContext });
+      renderSchedules(container, { user, setHeaderContext, permissions });
     });
   });
 
   container.querySelector('#btn-new-schedule')?.addEventListener('click', () => {
     const defaultPastoralId = coordPastoralIds.includes(activeTab) ? activeTab : coordPastoralIds[0];
-    openScheduleModal(null, { user, defaultPastoralId }, () => renderSchedules(container, { user, setHeaderContext }));
+    openScheduleModal(null, { user, defaultPastoralId }, () =>
+      renderSchedules(container, { user, setHeaderContext, permissions }),
+    );
   });
 
-  container.querySelectorAll('[data-edit-schedule]').forEach((btn) => {
+  tabBody.querySelectorAll('[data-edit-schedule]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const sch = dataService.getScheduleById(btn.dataset.editSchedule);
-      if (sch && canManageSchedule(user, sch)) {
-        openScheduleModal(sch, { user, defaultPastoralId: sch.pastoralId }, () => renderSchedules(container, { user, setHeaderContext }));
+      if (sch && canCreateEdit && canManageSchedule(user, sch)) {
+        openScheduleModal(sch, { user, defaultPastoralId: sch.pastoralId }, () =>
+          renderSchedules(container, { user, setHeaderContext, permissions }),
+        );
       }
     });
   });
 
-  container.querySelectorAll('[data-delete-schedule]').forEach((btn) => {
+  tabBody.querySelectorAll('[data-delete-schedule]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const sch = dataService.getScheduleById(btn.dataset.deleteSchedule);
-      if (!sch || !canManageSchedule(user, sch)) return;
+      if (!sch || !canCreateEdit || !canManageSchedule(user, sch)) return;
       if (!confirm('Deseja realmente excluir esta escala? Ela também será removida da Agenda sincronizada.')) return;
       dataService.deleteSchedule(sch.id);
       showToast('Escala excluída com sucesso.');
-      renderSchedules(container, { user, setHeaderContext });
+      renderSchedules(container, { user, setHeaderContext, permissions });
     });
   });
 
-  container.querySelectorAll('[data-request-sub]').forEach((btn) => {
+  tabBody.querySelectorAll('[data-request-sub]').forEach((btn) => {
     btn.addEventListener('click', () => {
       openSubstitutionModal(btn.dataset.scheduleId, btn.dataset.requestSub, () =>
-        renderSchedules(container, { user, setHeaderContext }),
+        renderSchedules(container, { user, setHeaderContext, permissions }),
       );
     });
   });
 
-  container.querySelectorAll('[data-reassign]').forEach((btn) => {
+  tabBody.querySelectorAll('[data-reassign]').forEach((btn) => {
     btn.addEventListener('click', () => {
       openReassignModal(btn.dataset.scheduleId, btn.dataset.reassign, user, () =>
-        renderSchedules(container, { user, setHeaderContext }),
+        renderSchedules(container, { user, setHeaderContext, permissions }),
       );
     });
   });
@@ -281,25 +287,19 @@ export function renderSchedules(container, { user, setHeaderContext }) {
   refreshIcons();
 }
 
-function renderScheduleCard(sch, { user, userMap, roleMap, pastoralMap, slotIndex }) {
+function renderScheduleCard(sch, { user, canCreateEdit, userMap, roleMap, pastoralMap, slotIndex }) {
   const isUserAssigned = (sch.assignments || []).some((a) => a.userId === user.id);
-  const canEdit = canManageSchedule(user, sch);
-  const isPast = sch.date < getTodayISO();
+  const canEdit = canCreateEdit && canManageSchedule(user, sch);
+  const countdown = getCountdownBadge(sch.date);
+  const isPast = countdown.diffDays < 0;
   const mainPastoral = pastoralMap[sch.pastoralId];
   const userHasConflictHere = isUserAssigned && hasTimeConflict(slotIndex, user.id, sch.date, sch.time);
-
-  // Na aba "Minhas Escalas", exibe primeiro as posições do usuário com a tag colorida da pastoral
-  const visibleAssignments =
-    activeTab === 'mine'
-      ? (sch.assignments || []).filter((a) => a.userId === user.id)
-      : sch.assignments || [];
 
   return `
     <article class="bg-white rounded-2xl border-2 ${
       isUserAssigned ? 'user-schedule-card' : 'border-[#E6DACE]'
     } overflow-hidden flex flex-col justify-between transition">
       <div>
-        <!-- Cabeçalho do Card -->
         <div class="px-5 py-4 border-b ${
           isUserAssigned ? 'bg-gradient-to-r from-amber-50/90 via-[#FDFBF7] to-white border-amber-200' : 'bg-[#FDFBF7] border-[#E6DACE]/80'
         }">
@@ -315,11 +315,9 @@ function renderScheduleCard(sch, { user, userMap, roleMap, pastoralMap, slotInde
                     : ''
                 }
                 ${renderPastoralPill(mainPastoral)}
-                ${
-                  isPast
-                    ? `<span class="text-[11px] font-semibold text-[#6D4C41] bg-[#F5EFE6] border border-[#E6DACE] px-2 py-0.5 rounded-full">Realizada</span>`
-                    : ''
-                }
+                <span class="inline-flex px-2 py-0.5 rounded-full text-[11px] font-bold border ${countdown.cls}">
+                  ${escapeHtml(countdown.label)}
+                </span>
               </div>
               <h4 class="text-base font-extrabold text-[#3E2723]">${escapeHtml(sch.celebrationType)}</h4>
               <div class="flex items-center gap-3 flex-wrap text-xs text-[#5D4037] mt-1.5">
@@ -361,97 +359,85 @@ function renderScheduleCard(sch, { user, userMap, roleMap, pastoralMap, slotInde
               ? `
             <div class="mt-3 rounded-xl bg-amber-100/90 border border-amber-300 px-3 py-2 text-xs text-amber-950 font-medium flex items-center gap-2">
               <i data-lucide="clock-alert" class="w-4 h-4 text-[#B45309] shrink-0"></i>
-              <span><strong>Atenção amigável:</strong> Você possui outra escala neste mesmo dia e horário (${escapeHtml(formatDateBR(sch.date))} às ${escapeHtml(sch.time)}).</span>
+              <span><strong>Atenção amigável:</strong> Você possui outra escala neste mesmo dia e horário.</span>
             </div>
           `
               : ''
           }
         </div>
 
-        <!-- Lista de Posições Escaladas -->
         <div class="p-5 space-y-2.5">
-          <p class="text-[11px] font-bold uppercase tracking-wider text-[#8D6E63]">Posições &amp; Escalados</p>
-          ${
-            visibleAssignments.length === 0
-              ? `<p class="text-xs text-[#8D6E63] italic">Nenhuma posição vinculada ainda.</p>`
-              : visibleAssignments
-                  .map((asg) => {
-                    const member = userMap[asg.userId];
-                    const role = roleMap[asg.roleId];
-                    const asgPastoral = pastoralMap[asg.pastoralId] || mainPastoral;
-                    const isMine = asg.userId === user.id;
-                    const canReassign = canManagePastoral(user, asg.pastoralId || sch.pastoralId);
-                    const memberConflict = hasTimeConflict(slotIndex, asg.userId, sch.date, sch.time);
+          <p class="text-[11px] font-bold uppercase tracking-wider text-[#8D6E63]">Equipe Escalada</p>
+          ${(sch.assignments || [])
+            .map((asg) => {
+              const member = userMap[asg.userId];
+              const role = roleMap[asg.roleId];
+              const asgPastoral = pastoralMap[asg.pastoralId] || mainPastoral;
+              const isMine = asg.userId === user.id;
+              const canReassign = canCreateEdit && canManagePastoral(user, asg.pastoralId || sch.pastoralId);
 
-                    return `
-                      <div class="rounded-xl p-3 border ${
-                        asg.substitutionRequested
-                          ? 'bg-red-50/70 border-red-200'
-                          : isMine
-                            ? 'bg-amber-50/80 border-amber-300'
-                            : 'bg-[#FAF6F0] border-[#E6DACE]'
-                      }">
-                        <div class="flex items-center justify-between gap-2 flex-wrap">
-                          <div class="min-w-0 space-y-1">
-                            <div class="flex items-center gap-1.5 flex-wrap">
-                              ${renderPastoralPill(asgPastoral, { compact: true })}
-                              <span class="text-[11px] font-bold uppercase tracking-wider ${isMine ? 'text-[#B45309]' : 'text-[#5D4037]'}">
-                                ${escapeHtml(role?.name || 'Função')}
-                              </span>
-                            </div>
-                            <p class="text-sm font-bold text-[#3E2723] flex items-center gap-1.5 flex-wrap">
-                              ${escapeHtml(member?.name || 'Membro não encontrado')}
-                              ${isMine ? '<span class="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-200 text-[#78350F]">Você</span>' : ''}
-                              ${
-                                memberConflict && !isMine && canReassign
-                                  ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300" title="Membro possui outra escala neste mesmo dia e horário">Conflito de horário</span>'
-                                  : ''
-                              }
-                            </p>
-                          </div>
-
-                          <div class="flex items-center gap-1.5 flex-wrap">
-                            ${
-                              asg.substitutionRequested
-                                ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-700 border border-red-300">
-                                    <i data-lucide="alert-circle" class="w-3 h-3"></i>
-                                    Substituição Solicitada
-                                  </span>`
-                                : ''
-                            }
-                            ${
-                              isMine && !asg.substitutionRequested && !isPast
-                                ? `<button type="button" data-request-sub="${asg.id}" data-schedule-id="${sch.id}"
-                                    class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-[#92400E] bg-white hover:bg-amber-50 border border-amber-300 transition">
-                                    <i data-lucide="refresh-cw" class="w-3 h-3"></i>
-                                    Solicitar Substituição
-                                  </button>`
-                                : ''
-                            }
-                            ${
-                              canReassign && asg.substitutionRequested
-                                ? `<button type="button" data-reassign="${asg.id}" data-schedule-id="${sch.id}"
-                                    class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-white bg-[#3E2723] hover:bg-[#5D4037] transition">
-                                    <i data-lucide="user-check" class="w-3 h-3 text-amber-400"></i>
-                                    Reatribuir
-                                  </button>`
-                                : ''
-                            }
-                          </div>
-                        </div>
-
-                        ${
-                          asg.substitutionRequested && asg.substitutionReason
-                            ? `<p class="mt-2 text-xs text-red-800 bg-white/85 rounded-lg px-2.5 py-1.5 border border-red-200">
-                                <strong>Motivo:</strong> ${escapeHtml(asg.substitutionReason)}
-                              </p>`
-                            : ''
-                        }
+              return `
+                <div class="rounded-xl p-3 border ${
+                  asg.substitutionRequested
+                    ? 'bg-red-50/70 border-red-200'
+                    : isMine
+                      ? 'bg-amber-50/80 border-amber-300'
+                      : 'bg-[#FAF6F0] border-[#E6DACE]'
+                }">
+                  <div class="flex items-center justify-between gap-2 flex-wrap">
+                    <div class="min-w-0 space-y-1">
+                      <div class="flex items-center gap-1.5 flex-wrap">
+                        ${renderPastoralPill(asgPastoral, { compact: true })}
+                        <span class="text-[11px] font-bold uppercase tracking-wider ${isMine ? 'text-[#B45309]' : 'text-[#5D4037]'}">
+                          ${escapeHtml(role?.name || 'Função')}
+                        </span>
                       </div>
-                    `;
-                  })
-                  .join('')
-          }
+                      <p class="text-sm font-bold text-[#3E2723] flex items-center gap-1.5 flex-wrap">
+                        ${escapeHtml(member?.name || 'Membro não encontrado')}
+                        ${isMine ? '<span class="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-200 text-[#78350F]">Você</span>' : ''}
+                      </p>
+                    </div>
+
+                    <div class="flex items-center gap-1.5 flex-wrap">
+                      ${
+                        asg.substitutionRequested
+                          ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-700 border border-red-300">
+                              <i data-lucide="alert-circle" class="w-3 h-3"></i>
+                              Substituição Solicitada
+                            </span>`
+                          : ''
+                      }
+                      ${
+                        isMine && !asg.substitutionRequested && !isPast
+                          ? `<button type="button" data-request-sub="${asg.id}" data-schedule-id="${sch.id}"
+                              class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-[#92400E] bg-white hover:bg-amber-50 border border-amber-300 transition">
+                              <i data-lucide="refresh-cw" class="w-3 h-3"></i>
+                              Solicitar Substituição
+                            </button>`
+                          : ''
+                      }
+                      ${
+                        canReassign && asg.substitutionRequested
+                          ? `<button type="button" data-reassign="${asg.id}" data-schedule-id="${sch.id}"
+                              class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-white bg-[#3E2723] hover:bg-[#5D4037] transition">
+                              <i data-lucide="user-check" class="w-3 h-3 text-amber-400"></i>
+                              Reatribuir
+                            </button>`
+                          : ''
+                      }
+                    </div>
+                  </div>
+                  ${
+                    asg.substitutionRequested && asg.substitutionReason
+                      ? `<p class="mt-2 text-xs text-red-800 bg-white/85 rounded-lg px-2.5 py-1.5 border border-red-200">
+                          <strong>Motivo:</strong> ${escapeHtml(asg.substitutionReason)}
+                        </p>`
+                      : ''
+                  }
+                </div>
+              `;
+            })
+            .join('')}
         </div>
       </div>
 
@@ -483,82 +469,69 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
   const pastoralMap = Object.fromEntries(allPastorals.map((p) => [p.id, p]));
   const roleMap = Object.fromEntries(dataService.getRoles().map((r) => [r.id, r]));
 
-  const bodyHtml = `
-    <form id="schedule-form" class="space-y-4">
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-        <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Data *</label>
-          <input id="sch-date-input" name="date" type="date" required value="${escapeHtml(existing?.date || getTodayISO())}"
-            class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">
-        </div>
-        <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Horário *</label>
-          <input id="sch-time-input" name="time" type="time" required value="${escapeHtml(existing?.time || '19:00')}"
-            class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">
-        </div>
-      </div>
-
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-        <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Local / Igreja *</label>
-          <input name="location" list="church-locations" required value="${escapeHtml(existing?.location || 'Matriz Santa Teresa')}"
-            placeholder="Ex: Matriz Santa Teresa"
-            class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">
-          <datalist id="church-locations">
-            ${DEFAULT_LOCATIONS.map((loc) => `<option value="${escapeHtml(loc)}"></option>`).join('')}
-          </datalist>
-        </div>
-        <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Tipo de Celebração *</label>
-          <select name="celebrationType" required
-            class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm bg-white focus:border-[#B45309] outline-none">
-            ${CELEBRATION_TYPES.map(
-              (type) => `<option value="${escapeHtml(type)}" ${existing?.celebrationType === type ? 'selected' : ''}>${escapeHtml(type)}</option>`,
-            ).join('')}
-          </select>
-        </div>
-      </div>
-
-      <!-- Alerta dinâmico de conflito de horário (amigável, não bloqueia salvamento) -->
-      <div id="schedule-conflict-banner" class="hidden rounded-xl bg-amber-50 border border-amber-300 p-3 text-xs text-amber-950 space-y-1"></div>
-
-      <!-- Vinculação Dinâmica: Pastoral -> Função -> Membro -->
-      <div class="pt-2 border-t border-[#E6DACE]/80">
-        <div class="flex items-center justify-between gap-2 mb-2.5 flex-wrap">
-          <div>
-            <label class="text-xs font-bold uppercase tracking-wider text-[#3E2723]">Posições da Escala</label>
-            <p class="text-[11px] text-[#6D4C41]">Escolha primeiro a <strong>Pastoral</strong>, depois a <strong>Função</strong> e o <strong>Membro ativo</strong>.</p>
-          </div>
-          <button id="btn-add-position-row" type="button"
-            class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 text-[#92400E] border border-amber-300 transition">
-            <i data-lucide="plus" class="w-3.5 h-3.5"></i>
-            Adicionar Posição
-          </button>
-        </div>
-        <div id="positions-list" class="space-y-2.5"></div>
-      </div>
-
-      <div>
-        <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Observações</label>
-        <textarea name="notes" rows="2" placeholder="Ex: Chegar 30 minutos antes na sacristia..."
-          class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">${escapeHtml(existing?.notes || '')}</textarea>
-      </div>
-
-      <div class="flex justify-end gap-2.5 pt-3 border-t border-[#E6DACE]/80">
-        <button type="button" id="cancel-modal-btn" class="px-4 py-2 rounded-xl border border-[#E6DACE] text-sm font-semibold text-[#5D4037] hover:bg-[#FAF6F0]">
-          Cancelar
-        </button>
-        <button type="submit" class="px-5 py-2 rounded-xl bg-[#3E2723] hover:bg-[#5D4037] text-white text-sm font-semibold transition">
-          ${existing ? 'Salvar Alterações' : 'Publicar Escala'}
-        </button>
-      </div>
-    </form>
-  `;
-
   openModal({
     title: existing ? 'Editar Escala' : 'Nova Escala Multi-Pastoral',
-    bodyHtml,
     maxWidth: 'max-w-3xl',
+    bodyHtml: `
+      <form id="schedule-form" class="space-y-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Data *</label>
+            <input id="sch-date-input" name="date" type="date" required value="${escapeHtml(existing?.date || getTodayISO())}"
+              class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Horário *</label>
+            <input id="sch-time-input" name="time" type="time" required value="${escapeHtml(existing?.time || '19:00')}"
+              class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Local / Igreja *</label>
+            <input name="location" list="church-locations" required value="${escapeHtml(existing?.location || 'Matriz Santa Teresa')}"
+              class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">
+            <datalist id="church-locations">
+              ${DEFAULT_LOCATIONS.map((loc) => `<option value="${escapeHtml(loc)}"></option>`).join('')}
+            </datalist>
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Tipo de Celebração *</label>
+            <select name="celebrationType" required class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm bg-white focus:border-[#B45309] outline-none">
+              ${CELEBRATION_TYPES.map((type) => `<option value="${escapeHtml(type)}" ${existing?.celebrationType === type ? 'selected' : ''}>${escapeHtml(type)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div id="schedule-conflict-banner" class="hidden rounded-xl bg-amber-50 border border-amber-300 p-3 text-xs text-amber-950 space-y-1"></div>
+
+        <div class="pt-2 border-t border-[#E6DACE]/80">
+          <div class="flex items-center justify-between gap-2 mb-2.5 flex-wrap">
+            <div>
+              <label class="text-xs font-bold uppercase tracking-wider text-[#3E2723]">Posições da Escala</label>
+              <p class="text-[11px] text-[#6D4C41]">Escolha primeiro a <strong>Pastoral</strong>, depois a <strong>Função</strong> e o <strong>Membro ativo</strong>.</p>
+            </div>
+            <button id="btn-add-position-row" type="button"
+              class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 text-[#92400E] border border-amber-300 transition">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+              Adicionar Posição
+            </button>
+          </div>
+          <div id="positions-list" class="space-y-2.5"></div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Observações</label>
+          <textarea name="notes" rows="2" class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">${escapeHtml(existing?.notes || '')}</textarea>
+        </div>
+
+        <div class="flex justify-end gap-2.5 pt-3 border-t border-[#E6DACE]/80">
+          <button type="button" id="cancel-modal-btn" class="px-4 py-2 rounded-xl border border-[#E6DACE] text-sm font-semibold text-[#5D4037] hover:bg-[#FAF6F0]">Cancelar</button>
+          <button type="submit" class="px-5 py-2 rounded-xl bg-[#3E2723] hover:bg-[#5D4037] text-white text-sm font-semibold transition">${existing ? 'Salvar Alterações' : 'Publicar Escala'}</button>
+        </div>
+      </form>
+    `,
     onMount(bodyEl) {
       const listEl = bodyEl.querySelector('#positions-list');
       const dateInput = bodyEl.querySelector('#sch-date-input');
@@ -575,20 +548,14 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
           const uid = row.querySelector('.pos-user').value;
           if (!uid) return;
           const memberName = dataService.getUserById(uid)?.name || 'Membro';
-
           pickedInForm[uid] = (pickedInForm[uid] || 0) + 1;
           if (pickedInForm[uid] === 2) {
             warnings.push(`<strong>${escapeHtml(memberName)}</strong> foi selecionado(a) em mais de uma posição nesta mesma escala.`);
           }
-
-          const externalConflicts = findConflictsForMember(allSchedules, uid, date, time, existing?.id);
-          if (externalConflicts.length > 0) {
-            const detail = externalConflicts
-              .map((c) => {
-                const pName = pastoralMap[c.assignment.pastoralId]?.shortName || 'outra pastoral';
-                const rName = roleMap[c.assignment.roleId]?.name || 'função';
-                return `${pName} (${rName})`;
-              })
+          const external = findConflictsForMember(allSchedules, uid, date, time, existing?.id);
+          if (external.length > 0) {
+            const detail = external
+              .map((c) => `${pastoralMap[c.assignment.pastoralId]?.shortName || 'outra pastoral'} (${roleMap[c.assignment.roleId]?.name || 'função'})`)
               .join(', ');
             warnings.push(`<strong>${escapeHtml(memberName)}</strong> já possui escala em ${formatDateBR(date)} às ${escapeHtml(time)} em: ${escapeHtml(detail)}.`);
           }
@@ -614,15 +581,11 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
       function populateRolesAndMembers(row, pastoralId, presetRoleId = '', presetUserId = '') {
         const activeRoles = dataService.getActiveRolesByPastoral(pastoralId);
         const activeMembers = dataService.getActiveUsersByPastoral(pastoralId);
-
-        const roleSel = row.querySelector('.pos-role');
-        const userSel = row.querySelector('.pos-user');
-
-        roleSel.innerHTML = `
+        row.querySelector('.pos-role').innerHTML = `
           <option value="">2. Função ativa...</option>
           ${activeRoles.map((r) => `<option value="${r.id}" ${presetRoleId === r.id ? 'selected' : ''}>${escapeHtml(r.name)}</option>`).join('')}
         `;
-        userSel.innerHTML = `
+        row.querySelector('.pos-user').innerHTML = `
           <option value="">3. Membro ativo...</option>
           ${activeMembers.map((u) => `<option value="${u.id}" ${presetUserId === u.id ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
         `;
@@ -645,9 +608,7 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
         row.innerHTML = `
           <div class="sm:col-span-4">
             <select class="pos-pastoral w-full px-2.5 py-2 rounded-lg border border-[#E6DACE] bg-white text-xs font-semibold text-[#3E2723] outline-none focus:border-[#B45309]" required>
-              ${managedPastorals
-                .map((p) => `<option value="${p.id}" ${rowPastoralId === p.id ? 'selected' : ''}>${escapeHtml(p.shortName)}</option>`)
-                .join('')}
+              ${managedPastorals.map((p) => `<option value="${p.id}" ${rowPastoralId === p.id ? 'selected' : ''}>${escapeHtml(p.shortName)}</option>`).join('')}
             </select>
           </div>
           <div class="sm:col-span-3">
@@ -657,14 +618,13 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
             <select class="pos-user w-full px-2.5 py-2 rounded-lg border border-[#E6DACE] bg-white text-xs font-medium outline-none focus:border-[#B45309]" required></select>
           </div>
           <div class="sm:col-span-1 flex justify-end">
-            <button type="button" class="remove-pos-btn p-1.5 rounded-lg text-[#8D6E63] hover:text-red-700 hover:bg-red-50 transition" title="Remover posição">
+            <button type="button" class="remove-pos-btn p-1.5 rounded-lg text-[#8D6E63] hover:text-red-700 hover:bg-red-50 transition">
               <i data-lucide="trash-2" class="w-4 h-4"></i>
             </button>
           </div>
         `;
 
         populateRolesAndMembers(row, rowPastoralId, preset?.roleId || '', preset?.userId || '');
-
         row.querySelector('.pos-pastoral').addEventListener('change', (e) => {
           populateRolesAndMembers(row, e.target.value);
           updateConflictWarnings();
@@ -681,9 +641,7 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
       }
 
       if (existing?.assignments?.length) {
-        existing.assignments
-          .filter((a) => managedIds.has(a.pastoralId || existing.pastoralId))
-          .forEach((a) => addPositionRow(a));
+        existing.assignments.filter((a) => managedIds.has(a.pastoralId || existing.pastoralId)).forEach((a) => addPositionRow(a));
       } else {
         addPositionRow();
       }
@@ -696,14 +654,13 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
       bodyEl.querySelector('#schedule-form').addEventListener('submit', (e) => {
         e.preventDefault();
         const fd = new FormData(e.target);
-        const editedAssignments = [];
-
+        const edited = [];
         listEl.querySelectorAll('.position-row').forEach((row) => {
           const pastoralId = row.querySelector('.pos-pastoral').value;
           const roleId = row.querySelector('.pos-role').value;
           const userId = row.querySelector('.pos-user').value;
           if (pastoralId && roleId && userId) {
-            editedAssignments.push({
+            edited.push({
               id: row.dataset.asgId || undefined,
               pastoralId,
               roleId,
@@ -714,14 +671,10 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
           }
         });
 
-        // Preserva posições de outras pastorais não gerenciadas caso a escala seja compartilhada
-        const preservedOther = (existing?.assignments || []).filter(
-          (a) => !managedIds.has(a.pastoralId || existing.pastoralId),
-        );
-        const finalAssignments = [...preservedOther, ...editedAssignments];
-
+        const preserved = (existing?.assignments || []).filter((a) => !managedIds.has(a.pastoralId || existing.pastoralId));
+        const finalAssignments = [...preserved, ...edited];
         if (finalAssignments.length === 0) {
-          showToast('Adicione pelo menos uma posição com Pastoral, Função e Membro ativo.', 'error');
+          showToast('Adicione pelo menos uma posição.', 'error');
           return;
         }
 
@@ -737,7 +690,7 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
         });
 
         closeModal();
-        showToast(existing ? 'Escala atualizada e sincronizada com a Agenda!' : 'Escala publicada e sincronizada com a Agenda!');
+        showToast(existing ? 'Escala atualizada!' : 'Escala publicada e sincronizada com a Agenda!');
         onSaved();
       });
     },
@@ -749,17 +702,14 @@ function openSubstitutionModal(scheduleId, assignmentId, onDone) {
     title: 'Solicitar Substituição',
     bodyHtml: `
       <form id="sub-form" class="space-y-4">
-        <p class="text-sm text-[#5D4037]">
-          Informe o motivo da sua indisponibilidade. A coordenação da respectiva pastoral receberá o alerta visual para reatribuir outro membro.
-        </p>
+        <p class="text-sm text-[#5D4037]">Informe o motivo da sua indisponibilidade para que a coordenação possa reatribuir outro membro.</p>
         <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1.5">Motivo da Substituição *</label>
-          <textarea name="reason" rows="3" required placeholder="Ex: Compromisso familiar / viagem / trabalho..."
-            class="w-full px-3.5 py-2.5 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none"></textarea>
+          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1.5">Motivo *</label>
+          <textarea name="reason" rows="3" required class="w-full px-3.5 py-2.5 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none"></textarea>
         </div>
         <div class="flex justify-end gap-2 pt-2">
-          <button type="button" id="cancel-sub-btn" class="px-4 py-2 rounded-xl border border-[#E6DACE] text-sm font-semibold text-[#5D4037] hover:bg-[#FAF6F0]">Cancelar</button>
-          <button type="submit" class="px-4 py-2 rounded-xl bg-[#B45309] hover:bg-[#92400E] text-white text-sm font-semibold transition">Confirmar Solicitação</button>
+          <button type="button" id="cancel-sub-btn" class="px-4 py-2 rounded-xl border border-[#E6DACE] text-sm font-semibold text-[#5D4037]">Cancelar</button>
+          <button type="submit" class="px-4 py-2 rounded-xl bg-[#B45309] hover:bg-[#92400E] text-white text-sm font-semibold">Confirmar</button>
         </div>
       </form>
     `,
@@ -767,10 +717,9 @@ function openSubstitutionModal(scheduleId, assignmentId, onDone) {
       bodyEl.querySelector('#cancel-sub-btn').addEventListener('click', closeModal);
       bodyEl.querySelector('#sub-form').addEventListener('submit', (e) => {
         e.preventDefault();
-        const reason = new FormData(e.target).get('reason');
-        dataService.requestSubstitution(scheduleId, assignmentId, String(reason));
+        dataService.requestSubstitution(scheduleId, assignmentId, String(new FormData(e.target).get('reason')));
         closeModal();
-        showToast('Substituição solicitada! A coordenação da pastoral foi sinalizada.');
+        showToast('Substituição solicitada!');
         onDone();
       });
     },
@@ -783,10 +732,7 @@ function openReassignModal(scheduleId, assignmentId, user, onDone) {
   const asg = sch.assignments.find((a) => a.id === assignmentId);
   if (!asg) return;
   const pastoralId = asg.pastoralId || sch.pastoralId;
-  if (!canManagePastoral(user, pastoralId)) {
-    showToast('Você só pode reatribuir posições das pastorais que coordena.', 'error');
-    return;
-  }
+  if (!canManagePastoral(user, pastoralId)) return;
 
   const pastoral = dataService.getPastoralById(pastoralId);
   const role = dataService.getRoleById(asg.roleId);
@@ -801,23 +747,17 @@ function openReassignModal(scheduleId, assignmentId, user, onDone) {
           <p><strong>Pastoral:</strong> ${escapeHtml(pastoral?.name || '—')}</p>
           <p><strong>Função:</strong> ${escapeHtml(role?.name || '—')}</p>
           <p><strong>Escalado atual:</strong> ${escapeHtml(currentUser?.name || '—')}</p>
-          <p><strong>Motivo informado:</strong> ${escapeHtml(asg.substitutionReason || 'Não informado')}</p>
+          <p><strong>Motivo:</strong> ${escapeHtml(asg.substitutionReason || '—')}</p>
         </div>
-
         <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1.5">Novo Membro Ativo da Pastoral *</label>
+          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1.5">Novo Membro Ativo *</label>
           <select name="newUserId" required class="w-full px-3 py-2.5 rounded-xl border border-[#E6DACE] bg-white text-sm outline-none focus:border-[#B45309]">
-            ${candidates
-              .map(
-                (c) => `<option value="${c.id}" ${c.id === asg.userId ? 'selected' : ''}>${escapeHtml(c.name)}${c.id === asg.userId ? ' (atual)' : ''}</option>`,
-              )
-              .join('')}
+            ${candidates.map((c) => `<option value="${c.id}" ${c.id === asg.userId ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
           </select>
         </div>
-
         <div class="flex justify-end gap-2 pt-2">
-          <button type="button" id="cancel-reassign-btn" class="px-4 py-2 rounded-xl border border-[#E6DACE] text-sm font-semibold text-[#5D4037] hover:bg-[#FAF6F0]">Cancelar</button>
-          <button type="submit" class="px-5 py-2 rounded-xl bg-[#3E2723] hover:bg-[#5D4037] text-white text-sm font-semibold transition">Salvar Reatribuição</button>
+          <button type="button" id="cancel-reassign-btn" class="px-4 py-2 rounded-xl border border-[#E6DACE] text-sm font-semibold text-[#5D4037]">Cancelar</button>
+          <button type="submit" class="px-5 py-2 rounded-xl bg-[#3E2723] hover:bg-[#5D4037] text-white text-sm font-semibold">Salvar Reatribuição</button>
         </div>
       </form>
     `,
@@ -825,10 +765,9 @@ function openReassignModal(scheduleId, assignmentId, user, onDone) {
       bodyEl.querySelector('#cancel-reassign-btn').addEventListener('click', closeModal);
       bodyEl.querySelector('#reassign-form').addEventListener('submit', (e) => {
         e.preventDefault();
-        const newUserId = new FormData(e.target).get('newUserId');
-        dataService.reassignScheduleMember(scheduleId, assignmentId, String(newUserId));
+        dataService.reassignScheduleMember(scheduleId, assignmentId, String(new FormData(e.target).get('newUserId')));
         closeModal();
-        showToast('Membro reatribuído com sucesso e Agenda sincronizada!');
+        showToast('Membro reatribuído com sucesso!');
         onDone();
       });
     },

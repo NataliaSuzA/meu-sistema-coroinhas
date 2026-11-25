@@ -1,9 +1,9 @@
 /**
- * Camada de persistência abstrata baseada em localStorage (v2 Multi-Pastoral).
- * Estruturada por coleções para futura migração direta ao Firebase Firestore.
+ * Camada de persistência abstrata baseada em localStorage (v3).
+ * Estruturada por coleções para futura migração direta ao Firebase Auth / Firestore.
  */
 
-const NAMESPACE = 'psta_gestao_v2';
+const NAMESPACE = 'psta_gestao_v3';
 
 export const COLLECTIONS = {
   PASTORALS: 'pastorals',
@@ -16,6 +16,8 @@ export const COLLECTIONS = {
   RESPONSES: 'responses',
   NOTICES: 'notices',
   ATTENDANCE: 'attendance',
+  PERMISSIONS: 'permissions',
+  BIRTHDAY_MESSAGES: 'birthday_messages',
   SETTINGS: 'settings',
   SESSION: 'session',
 };

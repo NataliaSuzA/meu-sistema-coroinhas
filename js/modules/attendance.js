@@ -12,7 +12,7 @@ import {
   formatDateBR,
   getCoordinatedPastoralIds,
   getUserMemberships,
-  isAnyCoordinator,
+  hasPermission,
   isGeneralAdmin,
   refreshIcons,
   renderPastoralPill,
@@ -79,8 +79,8 @@ function computeMemberStats(userId, allowedSessionIds, attendanceMap) {
   return { present, justified, absent, total, percentage };
 }
 
-export function renderAttendance(container, { user }) {
-  const anyCoord = isAnyCoordinator(user);
+export function renderAttendance(container, { user, permissions }) {
+  const canLaunchAttendance = hasPermission(user, 'attendance_manage', permissions);
   const generalAdmin = isGeneralAdmin(user);
   const pastorals = dataService.getPastorals();
   const pastoralMap = Object.fromEntries(pastorals.map((p) => [p.id, p]));
@@ -92,7 +92,7 @@ export function renderAttendance(container, { user }) {
 
   const allSessions = buildAttendanceSessions(schedules, events, users, pastoralMap);
 
-  if (!anyCoord) {
+  if (!canLaunchAttendance) {
     renderMemberAttendanceView(container, { user, sessions: allSessions, attendanceMap });
     return;
   }
@@ -289,12 +289,12 @@ export function renderAttendance(container, { user }) {
 
   container.querySelector('#attendance-session-select')?.addEventListener('change', (e) => {
     selectedSessionId = e.target.value;
-    renderAttendance(container, { user });
+    renderAttendance(container, { user, permissions });
   });
 
   container.querySelector('#attendance-pastoral-filter')?.addEventListener('change', (e) => {
     summaryPastoralFilter = e.target.value;
-    renderAttendance(container, { user });
+    renderAttendance(container, { user, permissions });
   });
 
   container.querySelectorAll('[data-mark-uid]').forEach((btn) => {
@@ -302,7 +302,7 @@ export function renderAttendance(container, { user }) {
       if (!activeSession) return;
       dataService.setAttendanceStatus(activeSession.id, btn.dataset.markUid, btn.dataset.markStatus);
       showToast(`Presença registrada: ${btn.dataset.markStatus}.`);
-      renderAttendance(container, { user });
+      renderAttendance(container, { user, permissions });
     });
   });
 

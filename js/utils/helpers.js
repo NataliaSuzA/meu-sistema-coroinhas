@@ -1,6 +1,7 @@
 /**
  * Utilitários compartilhados, regras de governança multi-pastoral (N:N),
- * detecção de conflitos de horário, tags coloridas de pastorais, modais e CSV.
+ * matriz dinâmica de permissões, contagem regressiva de datas, detecção de conflitos,
+ * prazos de formulários, tags coloridas de pastorais, modais e CSV.
  */
 
 export function escapeHtml(str) {
@@ -48,11 +49,91 @@ export function canManagePastoral(user, pastoralId) {
   return getUserMemberships(user).some((m) => m.pastoralId === pastoralId && m.role === 'Coordenador');
 }
 
+export function canManageAnyOfPastorals(user, pastoralIds = []) {
+  if (!user) return false;
+  if (isGeneralAdmin(user)) return true;
+  return (pastoralIds || []).some((pid) => canManagePastoral(user, pid));
+}
+
 export function canManageSchedule(user, schedule) {
   if (!user || !schedule) return false;
   if (isGeneralAdmin(user)) return true;
   if (canManagePastoral(user, schedule.pastoralId)) return true;
   return (schedule.assignments || []).some((a) => canManagePastoral(user, a.pastoralId));
+}
+
+// --- Matriz Dinâmica de Permissões ---
+
+export function hasPermission(user, permKey, permissionsMatrix) {
+  if (!user) return false;
+  if (isGeneralAdmin(user)) return true;
+  if (!permissionsMatrix) return false;
+  if (isAnyCoordinator(user)) {
+    return Boolean(permissionsMatrix.coordinator?.[permKey]);
+  }
+  return Boolean(permissionsMatrix.member?.[permKey]);
+}
+
+// --- Visibilidade Estrita por Pastoral (N:N) ---
+
+export function isPastoralScopedItemVisible(itemPastoralIds, user, allPastorals = []) {
+  if (!user) return false;
+  if (isGeneralAdmin(user)) return true;
+  const targets = Array.isArray(itemPastoralIds) && itemPastoralIds.length > 0 ? itemPastoralIds : ['all'];
+  if (targets.includes('all')) return true;
+  const userIds = new Set(getMemberPastoralIds(user, allPastorals));
+  return targets.some((pid) => userIds.has(pid));
+}
+
+// --- Prazo de Formulários ---
+
+export function isFormClosed(form) {
+  if (!form) return true;
+  if (!form.active) return true;
+  if (form.deadline) {
+    const dt = new Date(form.deadline);
+    if (!Number.isNaN(dt.getTime()) && dt.getTime() <= Date.now()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function isFormExpiredByDeadline(form) {
+  if (!form?.deadline) return false;
+  const dt = new Date(form.deadline);
+  return !Number.isNaN(dt.getTime()) && dt.getTime() <= Date.now();
+}
+
+export function getFormTargetUsers(form, allUsers = []) {
+  const targets = form?.pastoralIds || ['all'];
+  return allUsers.filter((u) => {
+    if (u.status !== 'Ativo' || u.isGeneralAdmin) return false;
+    if (targets.includes('all')) return true;
+    return getUserMemberships(u).some((m) => targets.includes(m.pastoralId));
+  });
+}
+
+// --- Contagem Regressiva de Datas ---
+
+export function getCountdownBadge(isoDate) {
+  if (!isoDate) return { label: '—', cls: 'bg-stone-100 text-stone-600 border-stone-200', diffDays: 0 };
+  const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const targetStart = new Date(y, m - 1, d);
+  const diffDays = Math.round((targetStart.getTime() - todayStart.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) {
+    return { label: 'Hoje', cls: 'bg-[#D97706] text-white border-[#B45309] shadow-xs', diffDays };
+  }
+  if (diffDays === 1) {
+    return { label: 'Amanhã', cls: 'bg-amber-100 text-[#92400E] border-amber-400', diffDays };
+  }
+  if (diffDays > 1) {
+    return { label: `Em ${diffDays} dias`, cls: 'bg-[#F5EFE6] text-[#4E342E] border-[#D7C4B2]', diffDays };
+  }
+  return { label: 'Realizada', cls: 'bg-stone-100 text-stone-500 border-stone-200', diffDays };
 }
 
 export function getUserRoleSummary(user, pastorals = []) {
@@ -81,7 +162,7 @@ export function getUserRoleSummary(user, pastorals = []) {
 
 export function renderPastoralPill(pastoral, { compact = false } = {}) {
   if (!pastoral) {
-    return `<span class="inline-flex items-center gap-1.5 ${compact ? 'px-2 py-0.5 text-[10px]' : 'px-2.5 py-0.5 text-[11px]'} rounded-full font-bold bg-[#F5EFE6] text-[#5D4037] border border-[#E6DACE]">Geral</span>`;
+    return `<span class="inline-flex items-center gap-1.5 ${compact ? 'px-2 py-0.5 text-[10px]' : 'px-2.5 py-0.5 text-[11px]'} rounded-full font-bold bg-[#F5EFE6] text-[#5D4037] border border-[#E6DACE]">Toda a Paróquia</span>`;
   }
   const color = pastoral.color || '#5D4037';
   const label = pastoral.shortName || pastoral.name;
@@ -94,12 +175,14 @@ export function renderPastoralPill(pastoral, { compact = false } = {}) {
   `;
 }
 
+export function renderPastoralPillsList(pastoralIds, pastoralMap, { compact = false } = {}) {
+  const list = Array.isArray(pastoralIds) && pastoralIds.length > 0 ? pastoralIds : ['all'];
+  if (list.includes('all')) return renderPastoralPill(null, { compact });
+  return list.map((pid) => renderPastoralPill(pastoralMap[pid], { compact })).join('');
+}
+
 // --- Detecção Amigável de Conflitos de Horário ---
 
-/**
- * Retorna um mapa { `${userId}|${date}|${time}`: count } para identificar
- * automaticamente múltiplas escalas no mesmo dia e horário.
- */
 export function buildUserTimeSlotIndex(schedules) {
   const counts = {};
   schedules.forEach((sch) => {
@@ -174,6 +257,12 @@ export function formatWeekdayBR(isoDate) {
   const dt = new Date(y, m - 1, d);
   const label = dt.toLocaleDateString('pt-BR', { weekday: 'long' });
   return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+export function cleanPhoneForWhatsApp(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) return '';
+  return digits.startsWith('55') ? digits : `55${digits}`;
 }
 
 export const MONTHS_PT = [
@@ -275,11 +364,6 @@ export function exportToCSV(filename, headers, rows) {
   URL.revokeObjectURL(url);
 }
 
-/**
- * Sincronização automática entre Escalas Multi-Pastoral e Agenda:
- * Unifica todas as escalas do usuário com a tag colorida da pastoral + função,
- * respeitando estritamente o isolamento de gestão dos coordenadores.
- */
 export function buildSyncedAgendaItems(user, { schedules, events, roles, pastorals, includeManagedSchedules = false }) {
   const roleMap = Object.fromEntries(roles.map((r) => [r.id, r.name]));
   const pastoralMap = Object.fromEntries(pastorals.map((p) => [p.id, p]));

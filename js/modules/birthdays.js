@@ -1,18 +1,32 @@
 /**
- * Módulo 10: Aniversariantes Multi-Pastoral
- * Lê automaticamente a data de nascimento do cadastro de usuários,
- * destaca aniversariantes de hoje e permite filtrar por mês e por pastoral.
+ * Módulo 10: Aniversariantes + Mural de Parabéns
+ * - Botão "Deixar Parabéns" em cada card (mensagens rápidas prontas ou recado personalizado)
+ * - Mini-mural dentro de cada card mostrando quem enviou, pastoral e data/hora
+ * - Atalho rápido de WhatsApp e filtros por mês e pastoral
  */
 
 import { dataService } from '../services/dataService.js';
 import {
+  cleanPhoneForWhatsApp,
+  closeModal,
   escapeHtml,
+  formatDateTimeBR,
   getInitials,
   getUserMemberships,
+  isGeneralAdmin,
   MONTHS_PT,
+  openModal,
   refreshIcons,
   renderPastoralPill,
+  showToast,
 } from '../utils/helpers.js';
+
+const QUICK_BIRTHDAY_MESSAGES = [
+  "Feliz aniversário! Que Deus e Santa Teresa d'Ávila abençoem muito sua vida e missão!",
+  'Parabéns pelo seu dia! Muita saúde, paz e alegria no serviço à nossa paróquia!',
+  'Que o Senhor ilumine sempre seus caminhos e renove suas forças. Feliz aniversário!',
+  'Feliz vida! Obrigado(a) por toda dedicação e carinho na nossa comunidade paroquial!',
+];
 
 let selectedMonth = new Date().getMonth() + 1;
 let selectedPastoralId = 'all';
@@ -24,13 +38,7 @@ function parseMonthDay(isoDate) {
   return { year: parts[0], month: parts[1], day: parts[2] };
 }
 
-function cleanPhoneForWhatsApp(phone) {
-  const digits = String(phone || '').replace(/\D/g, '');
-  if (!digits) return '';
-  return digits.startsWith('55') ? digits : `55${digits}`;
-}
-
-export function renderBirthdays(container) {
+export function renderBirthdays(container, { user }) {
   const today = new Date();
   const todayMonth = today.getMonth() + 1;
   const todayDay = today.getDate();
@@ -39,6 +47,7 @@ export function renderBirthdays(container) {
   const pastorals = dataService.getPastorals();
   const pastoralMap = Object.fromEntries(pastorals.map((p) => [p.id, p]));
   const users = dataService.getUsers();
+  const userMap = Object.fromEntries(users.map((u) => [u.id, u]));
 
   const birthdaysInMonth = users
     .map((u) => {
@@ -54,6 +63,7 @@ export function renderBirthdays(container) {
         bMonth: parsed.month,
         ageTurning: currentYear - parsed.year,
         isToday: parsed.month === todayMonth && parsed.day === todayDay,
+        wallMessages: dataService.getBirthdayMessagesForUser(u.id),
       };
     })
     .filter(Boolean)
@@ -65,9 +75,9 @@ export function renderBirthdays(container) {
     <div class="space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h3 class="text-xl font-extrabold text-[#3E2723]">Aniversariantes da Paróquia</h3>
+          <h3 class="text-xl font-extrabold text-[#3E2723]">Aniversariantes &amp; Mural de Parabéns</h3>
           <p class="text-sm text-[#6D4C41] mt-0.5">
-            Integrado automaticamente ao cadastro de membros. Celebre a vida de toda a comunidade!
+            Celebre a vida dos irmãos da comunidade deixando um recado no mural ou pelo WhatsApp!
           </p>
         </div>
 
@@ -89,6 +99,7 @@ export function renderBirthdays(container) {
         </div>
       </div>
 
+      <!-- Destaque Aniversariante de Hoje -->
       ${
         todayBirthdays.length > 0
           ? `
@@ -102,14 +113,14 @@ export function renderBirthdays(container) {
               .map((b) => {
                 const wa = cleanPhoneForWhatsApp(b.phone);
                 const msg = encodeURIComponent(
-                  `Paz e bem, ${b.name}! Parabéns pelo seu aniversário! Que Deus e Santa Teresa d'Ávila abençoem sempre sua vida e sua missão na nossa paróquia!`,
+                  `Paz e bem, ${b.name}! Parabéns pelo seu aniversário! Que Deus e Santa Teresa d'Ávila abençoem sempre sua vida e sua missão!`,
                 );
                 const pNames = getUserMemberships(b)
                   .map((m) => pastoralMap[m.pastoralId]?.shortName)
                   .filter(Boolean)
                   .join(' • ');
                 return `
-                  <div class="rounded-2xl bg-white/10 backdrop-blur-xs border border-amber-400/35 p-4 flex items-center justify-between gap-4">
+                  <div class="rounded-2xl bg-white/10 backdrop-blur-xs border border-amber-400/35 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div class="flex items-center gap-3.5 min-w-0">
                       <div class="w-12 h-12 rounded-2xl bg-amber-500 text-[#2B1B18] font-extrabold text-sm flex items-center justify-center shrink-0 shadow">
                         ${escapeHtml(getInitials(b.name))}
@@ -117,17 +128,24 @@ export function renderBirthdays(container) {
                       <div class="min-w-0">
                         <h4 class="font-extrabold text-white truncate">${escapeHtml(b.name)}</h4>
                         <p class="text-xs text-amber-200 font-semibold truncate">${escapeHtml(pNames || 'Paróquia Santa Teresa')} • ${String(b.bDay).padStart(2, '0')}/${String(b.bMonth).padStart(2, '0')}</p>
+                        <p class="text-[11px] text-amber-100/80 mt-0.5">${b.wallMessages.length} ${b.wallMessages.length === 1 ? 'recado no mural' : 'recados no mural'}</p>
                       </div>
                     </div>
-                    ${
-                      wa
-                        ? `<a href="https://wa.me/${wa}?text=${msg}" target="_blank" rel="noopener noreferrer"
-                            class="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-[#2B1B18] text-xs font-extrabold transition">
-                            <i data-lucide="message-circle" class="w-3.5 h-3.5"></i>
-                            Parabenizar
-                          </a>`
-                        : ''
-                    }
+                    <div class="flex items-center gap-2 shrink-0">
+                      <button type="button" data-congrats-uid="${b.id}"
+                        class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-[#2B1B18] text-xs font-extrabold transition">
+                        <i data-lucide="heart" class="w-3.5 h-3.5"></i>
+                        Deixar Parabéns
+                      </button>
+                      ${
+                        wa
+                          ? `<a href="https://wa.me/${wa}?text=${msg}" target="_blank" rel="noopener noreferrer" title="Enviar parabéns no WhatsApp"
+                              class="p-2 rounded-xl bg-white/15 hover:bg-white/25 text-white transition">
+                              <i data-lucide="message-circle" class="w-4 h-4"></i>
+                            </a>`
+                          : ''
+                      }
+                    </div>
                   </div>
                 `;
               })
@@ -138,6 +156,7 @@ export function renderBirthdays(container) {
           : ''
       }
 
+      <!-- Cards do Mês + Mini-Mural de Parabéns -->
       <section class="space-y-3">
         <h4 class="text-sm font-bold uppercase tracking-wider text-[#6D4C41]">
           Aniversariantes de ${MONTHS_PT[selectedMonth - 1]} (${birthdaysInMonth.length})
@@ -152,7 +171,7 @@ export function renderBirthdays(container) {
           </div>
         `
             : `
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
             ${birthdaysInMonth
               .map((b) => {
                 const wa = cleanPhoneForWhatsApp(b.phone);
@@ -162,42 +181,82 @@ export function renderBirthdays(container) {
                 const mems = getUserMemberships(b);
                 return `
                   <article class="bg-white rounded-2xl border-2 ${
-                    b.isToday ? 'border-amber-400 bg-amber-50/40 shadow-md' : 'border-[#E6DACE]'
+                    b.isToday ? 'border-amber-400 bg-amber-50/30 shadow-md' : 'border-[#E6DACE]'
                   } p-5 flex flex-col justify-between gap-4">
-                    <div class="flex items-start justify-between gap-3">
-                      <div class="flex items-center gap-3 min-w-0">
-                        <div class="w-11 h-11 rounded-xl ${
-                          b.isToday ? 'bg-[#D97706] text-white' : 'bg-[#3E2723] text-amber-400'
-                        } font-extrabold text-xs flex items-center justify-center shrink-0">
-                          ${escapeHtml(getInitials(b.name))}
-                        </div>
-                        <div class="min-w-0">
-                          <h5 class="font-bold text-[#3E2723] truncate">${escapeHtml(b.name)}</h5>
-                          <div class="flex items-center gap-1 flex-wrap mt-1">
-                            ${
-                              b.isGeneralAdmin
-                                ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-[#92400E] border border-amber-300">Coord. Geral</span>`
-                                : mems.map((m) => renderPastoralPill(pastoralMap[m.pastoralId], { compact: true })).join('')
-                            }
+                    <div class="space-y-4">
+                      <div class="flex items-start justify-between gap-3">
+                        <div class="flex items-center gap-3 min-w-0">
+                          <div class="w-11 h-11 rounded-xl ${
+                            b.isToday ? 'bg-[#D97706] text-white' : 'bg-[#3E2723] text-amber-400'
+                          } font-extrabold text-xs flex items-center justify-center shrink-0">
+                            ${escapeHtml(getInitials(b.name))}
+                          </div>
+                          <div class="min-w-0">
+                            <h5 class="font-extrabold text-[#3E2723] truncate">${escapeHtml(b.name)}</h5>
+                            <div class="flex items-center gap-1 flex-wrap mt-1">
+                              ${
+                                b.isGeneralAdmin
+                                  ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-[#92400E] border border-amber-300">Coord. Geral</span>`
+                                  : mems.map((m) => renderPastoralPill(pastoralMap[m.pastoralId], { compact: true })).join('')
+                              }
+                            </div>
                           </div>
                         </div>
+                        <div class="text-center px-2.5 py-1.5 rounded-xl ${
+                          b.isToday ? 'bg-[#D97706] text-white' : 'bg-[#F5EFE6] text-[#3E2723]'
+                        } shrink-0">
+                          <p class="text-base font-extrabold leading-none">${String(b.bDay).padStart(2, '0')}</p>
+                          <p class="text-[10px] font-bold uppercase mt-0.5">${MONTHS_PT[b.bMonth - 1].slice(0, 3)}</p>
+                        </div>
                       </div>
-                      <div class="text-center px-2.5 py-1.5 rounded-xl ${
-                        b.isToday ? 'bg-[#D97706] text-white' : 'bg-[#F5EFE6] text-[#3E2723]'
-                      } shrink-0">
-                        <p class="text-base font-extrabold leading-none">${String(b.bDay).padStart(2, '0')}</p>
-                        <p class="text-[10px] font-bold uppercase mt-0.5">${MONTHS_PT[b.bMonth - 1].slice(0, 3)}</p>
+
+                      <!-- Mini-Mural de Parabéns -->
+                      <div class="rounded-xl bg-[#FAF6F0] border border-[#E6DACE] p-3.5 space-y-2.5">
+                        <div class="flex items-center justify-between">
+                          <span class="text-[11px] font-extrabold uppercase tracking-wider text-[#5D4037] flex items-center gap-1.5">
+                            <i data-lucide="message-square-heart" class="w-3.5 h-3.5 text-[#B45309]"></i>
+                            Mural de Parabéns (${b.wallMessages.length})
+                          </span>
+                          <span class="text-[11px] text-[#8D6E63] font-medium">
+                            ${b.isToday ? '<strong class="text-[#B45309]">Hoje!</strong>' : `Completa ${b.ageTurning} anos`}
+                          </span>
+                        </div>
+
+                        ${
+                          b.wallMessages.length === 0
+                            ? `<p class="text-xs text-[#8D6E63] italic">Seja o primeiro a deixar um recado de parabéns!</p>`
+                            : `
+                          <div class="space-y-2 max-h-44 overflow-y-auto custom-scrollbar pr-1">
+                            ${b.wallMessages
+                              .map((wm) => {
+                                const authorName = userMap[wm.authorId]?.name || 'Membro da Paróquia';
+                                return `
+                                  <div class="rounded-lg bg-white border border-[#E6DACE]/80 p-2.5 text-xs">
+                                    <p class="text-[#3E2723] leading-relaxed">“${escapeHtml(wm.message)}”</p>
+                                    <div class="mt-1.5 flex items-center justify-between gap-2 text-[10px] text-[#8D6E63]">
+                                      <span class="font-bold text-[#5D4037]">${escapeHtml(authorName)} • ${escapeHtml(wm.authorPastoralLabel)}</span>
+                                      <span>${escapeHtml(formatDateTimeBR(wm.createdAt))}</span>
+                                    </div>
+                                  </div>
+                                `;
+                              })
+                              .join('')}
+                          </div>
+                        `
+                        }
                       </div>
                     </div>
 
-                    <div class="pt-3 border-t border-[#E6DACE]/70 flex items-center justify-between text-xs">
-                      <span class="text-[#6D4C41] font-medium">
-                        ${b.isToday ? '<strong class="text-[#B45309]">Faz aniversário hoje!</strong>' : `Completa ${b.ageTurning} anos`}
-                      </span>
+                    <div class="pt-3 border-t border-[#E6DACE]/70 flex items-center justify-between gap-2 flex-wrap">
+                      <button type="button" data-congrats-uid="${b.id}"
+                        class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#3E2723] hover:bg-[#5D4037] text-white text-xs font-bold transition">
+                        <i data-lucide="heart" class="w-3.5 h-3.5 text-amber-400"></i>
+                        Deixar Parabéns
+                      </button>
                       ${
                         wa
                           ? `<a href="https://wa.me/${wa}?text=${msg}" target="_blank" rel="noopener noreferrer"
-                              class="inline-flex items-center gap-1 font-bold text-[#B45309] hover:text-[#3E2723] transition">
+                              class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold transition">
                               <i data-lucide="message-circle" class="w-3.5 h-3.5"></i>
                               WhatsApp
                             </a>`
@@ -217,13 +276,91 @@ export function renderBirthdays(container) {
 
   container.querySelector('#bday-month-select').addEventListener('change', (e) => {
     selectedMonth = Number(e.target.value);
-    renderBirthdays(container);
+    renderBirthdays(container, { user });
   });
 
   container.querySelector('#bday-pastoral-select').addEventListener('change', (e) => {
     selectedPastoralId = e.target.value;
-    renderBirthdays(container);
+    renderBirthdays(container, { user });
+  });
+
+  container.querySelectorAll('[data-congrats-uid]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const recipient = dataService.getUserById(btn.dataset.congratsUid);
+      if (recipient) {
+        openCongratsModal(recipient, user, pastoralMap, () => renderBirthdays(container, { user }));
+      }
+    });
   });
 
   refreshIcons();
+}
+
+function openCongratsModal(recipient, author, pastoralMap, onSaved) {
+  const authorPastoralLabel = isGeneralAdmin(author)
+    ? 'Coordenação Geral'
+    : getUserMemberships(author)
+        .map((m) => pastoralMap[m.pastoralId]?.shortName)
+        .filter(Boolean)
+        .join(', ') || "Paróquia Santa Teresa d'Ávila";
+
+  openModal({
+    title: `Deixar Parabéns para ${recipient.name.split(' ')[0]}`,
+    maxWidth: 'max-w-xl',
+    bodyHtml: `
+      <form id="congrats-form" class="space-y-4">
+        <div>
+          <p class="text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-2">Mensagens rápidas prontas (clique para preencher):</p>
+          <div class="space-y-1.5">
+            ${QUICK_BIRTHDAY_MESSAGES.map(
+              (msg, idx) => `
+              <button type="button" data-quick-msg="${idx}"
+                class="w-full text-left text-xs text-[#3E2723] bg-[#FAF6F0] hover:bg-amber-50 border border-[#E6DACE] hover:border-amber-300 rounded-xl px-3 py-2 transition">
+                “${escapeHtml(msg)}”
+              </button>
+            `,
+            ).join('')}
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Seu Recado Personalizado *</label>
+          <textarea id="congrats-textarea" name="message" rows="3" required placeholder="Escreva sua mensagem de parabéns..."
+            class="w-full px-3.5 py-2.5 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none"></textarea>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2">
+          <button type="button" id="cancel-congrats-btn" class="px-4 py-2 rounded-xl border border-[#E6DACE] text-sm font-semibold text-[#5D4037] hover:bg-[#FAF6F0]">Cancelar</button>
+          <button type="submit" class="px-5 py-2 rounded-xl bg-[#B45309] hover:bg-[#92400E] text-white text-sm font-semibold transition flex items-center gap-1.5">
+            <i data-lucide="send" class="w-3.5 h-3.5"></i>
+            Publicar no Mural
+          </button>
+        </div>
+      </form>
+    `,
+    onMount(bodyEl) {
+      const textarea = bodyEl.querySelector('#congrats-textarea');
+      bodyEl.querySelectorAll('[data-quick-msg]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          textarea.value = QUICK_BIRTHDAY_MESSAGES[Number(btn.dataset.quickMsg)] || '';
+          textarea.focus();
+        });
+      });
+      bodyEl.querySelector('#cancel-congrats-btn').addEventListener('click', closeModal);
+      bodyEl.querySelector('#congrats-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const message = textarea.value.trim();
+        if (!message) return;
+        dataService.addBirthdayMessage({
+          recipientUserId: recipient.id,
+          authorId: author.id,
+          authorPastoralLabel,
+          message,
+        });
+        closeModal();
+        showToast(`Parabéns publicado no mural de ${recipient.name.split(' ')[0]}!`);
+        onSaved();
+      });
+    },
+  });
 }

@@ -1,9 +1,10 @@
 /**
- * Serviço de domínio multi-pastoral (pronto para futura migração ao Firestore).
+ * Serviço de domínio v3 (Multi-Pastoral, Permissões, Perfil, Mural de Parabéns,
+ * Formulários com Prazo/Validação e Segmentação N:N de Notas e Avisos).
  */
 
 import { storageAdapter, COLLECTIONS } from './storage.js';
-import { buildSeedData } from './seedData.js';
+import { buildDefaultPermissions, buildSeedData } from './seedData.js';
 
 function genId(prefix) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
@@ -28,6 +29,8 @@ export const dataService = {
     storageAdapter.saveCollection(COLLECTIONS.RESPONSES, seed.responses);
     storageAdapter.saveCollection(COLLECTIONS.NOTICES, seed.notices);
     storageAdapter.saveDocument(COLLECTIONS.ATTENDANCE, seed.attendance);
+    storageAdapter.saveDocument(COLLECTIONS.PERMISSIONS, seed.permissions);
+    storageAdapter.saveCollection(COLLECTIONS.BIRTHDAY_MESSAGES, seed.birthdayMessages);
     storageAdapter.saveDocument(COLLECTIONS.SETTINGS, seed.settings);
     storageAdapter.markSeeded();
   },
@@ -40,6 +43,28 @@ export const dataService = {
 
   setSessionUserId(userId) {
     storageAdapter.saveDocument(COLLECTIONS.SESSION, userId ? { userId } : null);
+  },
+
+  // --- Permissões Dinâmicas ---
+  getPermissions() {
+    const defaults = buildDefaultPermissions();
+    const saved = storageAdapter.getDocument(COLLECTIONS.PERMISSIONS, null);
+    if (!saved) return defaults;
+    return {
+      coordinator: { ...defaults.coordinator, ...(saved.coordinator || {}) },
+      member: { ...defaults.member, ...(saved.member || {}) },
+    };
+  },
+
+  savePermissions(matrix) {
+    storageAdapter.saveDocument(COLLECTIONS.PERMISSIONS, matrix);
+    return matrix;
+  },
+
+  resetPermissionsToDefault() {
+    const defaults = buildDefaultPermissions();
+    storageAdapter.saveDocument(COLLECTIONS.PERMISSIONS, defaults);
+    return defaults;
   },
 
   // --- Configurações ---
@@ -86,7 +111,6 @@ export const dataService = {
   deletePastoral(id) {
     storageAdapter.saveCollection(COLLECTIONS.PASTORALS, this.getPastorals().filter((p) => p.id !== id));
     storageAdapter.saveCollection(COLLECTIONS.ROLES, this.getRoles().filter((r) => r.pastoralId !== id));
-    // Remove vínculos da pastoral excluída nos usuários
     const updatedUsers = this.getUsers().map((u) => ({
       ...u,
       memberships: (u.memberships || []).filter((m) => m.pastoralId !== id),
@@ -94,7 +118,7 @@ export const dataService = {
     storageAdapter.saveCollection(COLLECTIONS.USERS, updatedUsers);
   },
 
-  // --- Usuários (N:N com Pastorais) ---
+  // --- Usuários & Meu Perfil ---
   getUsers() {
     return storageAdapter.getCollection(COLLECTIONS.USERS, []);
   },
@@ -115,16 +139,54 @@ export const dataService = {
     if (user.id) {
       const idx = list.findIndex((u) => u.id === user.id);
       if (idx >= 0) {
-        list[idx] = { ...list[idx], ...user, memberships: cleanMemberships };
+        list[idx] = {
+          ...list[idx],
+          ...user,
+          password: user.password || list[idx].password || 'pastoral2026',
+          memberships: cleanMemberships,
+        };
       } else {
-        list.push({ ...user, memberships: cleanMemberships });
+        list.push({ ...user, password: user.password || 'pastoral2026', memberships: cleanMemberships });
       }
     } else {
-      user = { ...user, id: genId('usr'), memberships: cleanMemberships };
+      user = {
+        ...user,
+        id: genId('usr'),
+        password: user.password || 'pastoral2026',
+        memberships: cleanMemberships,
+      };
       list.push(user);
     }
     storageAdapter.saveCollection(COLLECTIONS.USERS, list);
     return user;
+  },
+
+  updateOwnProfile(userId, { name, email, phone, birthDate }) {
+    const list = this.getUsers();
+    const idx = list.findIndex((u) => u.id === userId);
+    if (idx < 0) return null;
+    list[idx] = {
+      ...list[idx],
+      name: String(name).trim(),
+      email: String(email).trim(),
+      phone: String(phone).trim(),
+      birthDate,
+    };
+    storageAdapter.saveCollection(COLLECTIONS.USERS, list);
+    return list[idx];
+  },
+
+  updateOwnPassword(userId, currentPassword, newPassword) {
+    const list = this.getUsers();
+    const idx = list.findIndex((u) => u.id === userId);
+    if (idx < 0) return { ok: false, error: 'Usuário não encontrado.' };
+    const stored = list[idx].password || 'pastoral2026';
+    if (stored !== currentPassword) {
+      return { ok: false, error: 'A senha atual informada está incorreta.' };
+    }
+    list[idx] = { ...list[idx], password: newPassword };
+    storageAdapter.saveCollection(COLLECTIONS.USERS, list);
+    return { ok: true, user: list[idx] };
   },
 
   deleteUser(id) {
@@ -165,7 +227,7 @@ export const dataService = {
     storageAdapter.saveCollection(COLLECTIONS.ROLES, this.getRoles().filter((r) => r.id !== id));
   },
 
-  // --- Escalas Multi-Pastoral ---
+  // --- Escalas ---
   getSchedules() {
     return storageAdapter.getCollection(COLLECTIONS.SCHEDULES, []);
   },
@@ -252,18 +314,19 @@ export const dataService = {
     storageAdapter.saveCollection(COLLECTIONS.EVENTS, this.getEvents().filter((e) => e.id !== id));
   },
 
-  // --- Bloco de Notas ---
+  // --- Bloco de Notas (N:N pastoralIds) ---
   getNotes() {
     return storageAdapter.getCollection(COLLECTIONS.NOTES, []);
   },
 
   saveNote(note) {
     const list = this.getNotes();
+    const pastoralIds = Array.isArray(note.pastoralIds) && note.pastoralIds.length > 0 ? note.pastoralIds : ['all'];
     if (note.id) {
       const idx = list.findIndex((n) => n.id === note.id);
-      if (idx >= 0) list[idx] = { ...list[idx], ...note };
+      if (idx >= 0) list[idx] = { ...list[idx], ...note, pastoralIds };
     } else {
-      note = { ...note, id: genId('note'), createdAt: new Date().toISOString() };
+      note = { ...note, id: genId('note'), pastoralIds, createdAt: new Date().toISOString() };
       list.unshift(note);
     }
     storageAdapter.saveCollection(COLLECTIONS.NOTES, list);
@@ -274,7 +337,7 @@ export const dataService = {
     storageAdapter.saveCollection(COLLECTIONS.NOTES, this.getNotes().filter((n) => n.id !== id));
   },
 
-  // --- Formulários e Respostas ---
+  // --- Formulários (N:N pastoralIds + deadline) e Respostas (validação) ---
   getForms() {
     return storageAdapter.getCollection(COLLECTIONS.FORMS, []);
   },
@@ -288,11 +351,12 @@ export const dataService = {
       required: Boolean(q.required),
       options: q.options || [],
     }));
+    const pastoralIds = Array.isArray(form.pastoralIds) && form.pastoralIds.length > 0 ? form.pastoralIds : ['all'];
     if (form.id) {
       const idx = list.findIndex((f) => f.id === form.id);
-      if (idx >= 0) list[idx] = { ...list[idx], ...form, questions };
+      if (idx >= 0) list[idx] = { ...list[idx], ...form, pastoralIds, questions };
     } else {
-      form = { ...form, id: genId('form'), createdAt: new Date().toISOString().slice(0, 10), questions };
+      form = { ...form, id: genId('form'), pastoralIds, createdAt: new Date().toISOString().slice(0, 10), questions };
       list.unshift(form);
     }
     storageAdapter.saveCollection(COLLECTIONS.FORMS, list);
@@ -311,12 +375,18 @@ export const dataService = {
   saveResponse(response) {
     const list = this.getResponses();
     const existingIdx = list.findIndex((r) => r.formId === response.formId && r.userId === response.userId);
+    if (existingIdx >= 0 && list[existingIdx].validated) {
+      return { ok: false, error: 'Esta resposta já foi validada pela Coordenação e não pode ser editada.' };
+    }
     const payload = {
       id: existingIdx >= 0 ? list[existingIdx].id : genId('resp'),
       formId: response.formId,
       userId: response.userId,
       answers: response.answers,
       submittedAt: new Date().toISOString(),
+      validated: false,
+      validatedBy: null,
+      validatedAt: null,
     };
     if (existingIdx >= 0) {
       list[existingIdx] = payload;
@@ -324,28 +394,40 @@ export const dataService = {
       list.unshift(payload);
     }
     storageAdapter.saveCollection(COLLECTIONS.RESPONSES, list);
-    return payload;
+    return { ok: true, response: payload };
   },
 
-  // --- Avisos ---
+  validateResponse(responseId, validatorUserId) {
+    const list = this.getResponses();
+    const target = list.find((r) => r.id === responseId);
+    if (!target) return null;
+    target.validated = true;
+    target.validatedBy = validatorUserId;
+    target.validatedAt = new Date().toISOString();
+    storageAdapter.saveCollection(COLLECTIONS.RESPONSES, list);
+    return target;
+  },
+
+  // --- Avisos (N:N pastoralIds) ---
   getNotices() {
     return storageAdapter.getCollection(COLLECTIONS.NOTICES, []);
   },
 
   saveNotice(notice) {
     const list = this.getNotices();
+    const pastoralIds = Array.isArray(notice.pastoralIds) && notice.pastoralIds.length > 0 ? notice.pastoralIds : ['all'];
     if (notice.pinned) {
       list.forEach((n) => {
-        if (n.pastoralId === notice.pastoralId || notice.pastoralId === 'all') {
-          n.pinned = false;
-        }
+        const nPids = n.pastoralIds || ['all'];
+        const overlap = pastoralIds.includes('all') || nPids.some((id) => pastoralIds.includes(id));
+        if (overlap) n.pinned = false;
       });
     }
     if (notice.id) {
       const idx = list.findIndex((n) => n.id === notice.id);
-      if (idx >= 0) list[idx] = { ...list[idx], ...notice };
+      if (idx >= 0) list[idx] = { ...list[idx], ...notice, pastoralIds };
     } else {
-      notice = { ...notice, id: genId('not'), createdAt: new Date().toISOString() };
+      notice = { ...notice, id: genId('not'), pastoralIds, createdAt: new Date().toISOString() };
       list.unshift(notice);
     }
     storageAdapter.saveCollection(COLLECTIONS.NOTICES, list);
@@ -358,8 +440,12 @@ export const dataService = {
     if (!target) return;
     const willPin = !target.pinned;
     if (willPin) {
+      const tPids = target.pastoralIds || ['all'];
       list.forEach((n) => {
-        if (n.pastoralId === target.pastoralId) n.pinned = false;
+        const nPids = n.pastoralIds || ['all'];
+        if (tPids.includes('all') || nPids.some((pid) => tPids.includes(pid))) {
+          n.pinned = false;
+        }
       });
     }
     target.pinned = willPin;
@@ -381,5 +467,31 @@ export const dataService = {
     map[sourceId][userId] = status;
     storageAdapter.saveDocument(COLLECTIONS.ATTENDANCE, map);
     return map;
+  },
+
+  // --- Mural de Parabéns ---
+  getBirthdayMessages() {
+    return storageAdapter.getCollection(COLLECTIONS.BIRTHDAY_MESSAGES, []);
+  },
+
+  getBirthdayMessagesForUser(recipientUserId) {
+    return this.getBirthdayMessages()
+      .filter((m) => m.recipientUserId === recipientUserId)
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  },
+
+  addBirthdayMessage({ recipientUserId, authorId, authorPastoralLabel, message }) {
+    const list = this.getBirthdayMessages();
+    const item = {
+      id: genId('bmsg'),
+      recipientUserId,
+      authorId,
+      authorPastoralLabel: authorPastoralLabel || "Paróquia Santa Teresa d'Ávila",
+      message: String(message).trim(),
+      createdAt: new Date().toISOString(),
+    };
+    list.unshift(item);
+    storageAdapter.saveCollection(COLLECTIONS.BIRTHDAY_MESSAGES, list);
+    return item;
   },
 };

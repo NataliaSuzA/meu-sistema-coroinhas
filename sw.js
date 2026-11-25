@@ -1,10 +1,8 @@
 /**
- * Service Worker da Plataforma Gestão Pastoral - Paróquia Santa Teresa d'Ávila
- * Estratégia Network-First para arquivos da aplicação (mantendo atualizações imediatas
- * na Vercel) com fallback de cache para uso offline / PWA standalone.
+ * Service Worker v3 — Gestão Pastoral - Paróquia Santa Teresa d'Ávila
  */
 
-const CACHE_NAME = 'santa-teresa-pastoral-v2';
+const CACHE_NAME = 'santa-teresa-pastoral-v3';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -18,6 +16,9 @@ const CORE_ASSETS = [
   './js/services/seedData.js',
   './js/services/dataService.js',
   './js/utils/helpers.js',
+  './js/modules/profile.js',
+  './js/modules/permissions.js',
+  './js/modules/myDates.js',
   './js/modules/dashboard.js',
   './js/modules/users.js',
   './js/modules/agenda.js',

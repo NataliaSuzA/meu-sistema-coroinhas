@@ -1,23 +1,20 @@
 /**
- * Controlador principal da Plataforma Multi-Pastoral — Paróquia Santa Teresa d'Ávila
- * - Autenticação + Tela de Login + Seletor Rápido com 4 perfis demonstrando isolamento:
- *   1. Coordenação Geral (Admin Paroquial)
- *   2. Coordenadora 1 (Natália: Coroinhas e Liturgia)
- *   3. Coordenador 2 (Carlos: Música e Acolhida)
- *   4. Membro Simples (João: multi-pastoral)
- * - Registro do Service Worker (PWA) + botão discreto "Instalar App no Celular"
- * - Cabeçalho interno dinâmico + Sidebar Carmelita responsiva
+ * Controlador principal v3 — Paróquia Santa Teresa d'Ávila • Gestão Pastoral
+ * - Meu Perfil + Troca de Senha no cabeçalho (todos os perfis)
+ * - Matriz Dinâmica de Permissões aplicada em tempo real na Sidebar, rotas e ações
+ * - Tela dedicada "Minhas Datas" + isolamento completo por pastoral
+ * - PWA Service Worker + guia de instalação Android/iOS
  */
 
 import { dataService } from './services/dataService.js';
 import {
   closeModal,
   escapeHtml,
-  getCoordinatedPastoralIds,
   getFirstName,
   getInitials,
   getUserMemberships,
   getUserRoleSummary,
+  hasPermission,
   isAnyCoordinator,
   isGeneralAdmin,
   openModal,
@@ -25,6 +22,9 @@ import {
   showToast,
 } from './utils/helpers.js';
 
+import { openMyProfileModal } from './modules/profile.js';
+import { renderPermissions } from './modules/permissions.js';
+import { renderMyDates } from './modules/myDates.js';
 import { renderDashboard, resetDashboardFilter } from './modules/dashboard.js';
 import { renderUsers } from './modules/users.js';
 import { renderAgenda } from './modules/agenda.js';
@@ -38,26 +38,43 @@ import { renderAttendance } from './modules/attendance.js';
 import { renderResponses } from './modules/responses.js';
 
 const MENU_ITEMS = [
-  { id: 'dashboard', label: 'Início', subtitle: 'Visão Geral das Pastorais', icon: 'layout-dashboard', coordOnly: false },
-  { id: 'users', label: 'Gestão de Usuários', subtitle: 'Cadastro de membros e vínculos N:N com pastorais', icon: 'users', coordOnly: true },
-  { id: 'agenda', label: 'Agenda', subtitle: 'Calendário unificado com suas escalas e eventos', icon: 'calendar-days', coordOnly: false },
-  { id: 'schedules', label: 'Escalas', subtitle: 'Visão Geral das Pastorais', icon: 'calendar-check-2', coordOnly: false },
-  { id: 'roles', label: 'Pastorais & Funções', subtitle: 'Cadastro de pastorais e funções litúrgicas/ministeriais', icon: 'sliders-horizontal', coordOnly: true },
-  { id: 'forms', label: 'Formulários', subtitle: 'Pesquisas de disponibilidade e inscrições', icon: 'clipboard-list', coordOnly: false },
-  { id: 'notes', label: 'Bloco de Notas', subtitle: 'Mural compartilhado de orientações por pastoral', icon: 'notebook-pen', coordOnly: false },
-  { id: 'notices', label: 'Avisos', subtitle: 'Comunicados paroquiais e das pastorais', icon: 'megaphone', coordOnly: false },
-  { id: 'birthdays', label: 'Aniversariantes', subtitle: 'Celebração dos aniversariantes da paróquia', icon: 'cake', coordOnly: false },
-  { id: 'attendance', label: 'Presença', subtitle: 'Chamadas e indicador de frequência', icon: 'check-square', coordOnly: false },
-  { id: 'responses', label: 'Respostas', subtitle: 'Painel consolidado e exportação CSV/Excel', icon: 'bar-chart-3', coordOnly: true },
-  { id: 'instagram', label: 'Instagram', subtitle: 'Perfil oficial da paróquia', icon: 'instagram', coordOnly: false, external: true },
+  { id: 'dashboard', label: 'Início', subtitle: 'Visão Geral das Pastorais', icon: 'layout-dashboard', permKey: 'dashboard' },
+  { id: 'my_dates', label: 'Minhas Datas', subtitle: 'Seus compromissos pessoais em ordem cronológica', icon: 'calendar-clock', permKey: 'my_dates' },
+  { id: 'users', label: 'Gestão de Usuários', subtitle: 'Cadastro de membros e vínculos N:N com pastorais', icon: 'users', permKey: 'users', badge: 'Gestão' },
+  { id: 'agenda', label: 'Agenda', subtitle: 'Calendário unificado com suas escalas e eventos', icon: 'calendar-days', permKey: 'agenda' },
+  { id: 'schedules', label: 'Escalas', subtitle: 'Visão Geral das Pastorais', icon: 'calendar-check-2', permKey: 'schedules_view' },
+  { id: 'roles', label: 'Pastorais & Funções', subtitle: 'Cadastro de pastorais e funções litúrgicas/ministeriais', icon: 'sliders-horizontal', permKey: 'roles', badge: 'Gestão' },
+  { id: 'forms', label: 'Formulários', subtitle: 'Pesquisas segmentadas por pastoral e prazo', icon: 'clipboard-list', permAny: ['forms_answer', 'forms_manage'] },
+  { id: 'notes', label: 'Bloco de Notas', subtitle: 'Mural segmentado de orientações por pastoral', icon: 'notebook-pen', permKey: 'notes' },
+  { id: 'notices', label: 'Avisos', subtitle: 'Comunicados paroquiais e das suas pastorais', icon: 'megaphone' },
+  { id: 'birthdays', label: 'Aniversariantes', subtitle: 'Aniversariantes do mês e Mural de Parabéns', icon: 'cake', permKey: 'birthdays' },
+  { id: 'attendance', label: 'Presença', subtitle: 'Chamadas e indicador de frequência', icon: 'check-square', permAny: ['attendance_manage', 'attendance_self'] },
+  { id: 'responses', label: 'Respostas', subtitle: 'Adesão, validação, pendentes e exportação CSV/Excel', icon: 'bar-chart-3', permKey: 'responses', badge: 'Gestão' },
+  { id: 'permissions', label: 'Permissões e Acessos', subtitle: 'Matriz dinâmica de permissões por perfil', icon: 'shield-check', adminOnly: true, badge: 'Admin' },
+  { id: 'instagram', label: 'Instagram', subtitle: 'Perfil oficial da paróquia', icon: 'instagram', external: true },
 ];
 
 let currentUser = null;
 let currentRoute = 'dashboard';
 let deferredInstallPrompt = null;
 
+function canAccessMenuItem(item, user, permissions) {
+  if (!item || !user) return false;
+  if (item.external) return true;
+  if (item.adminOnly) return isGeneralAdmin(user);
+  if (isGeneralAdmin(user)) return true;
+  if (item.permKey) return hasPermission(user, item.permKey, permissions);
+  if (item.permAny) return item.permAny.some((k) => hasPermission(user, k, permissions));
+  return true;
+}
+
 function registerServiceWorker() {
-  if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost')) {
+  if (
+    'serviceWorker' in navigator &&
+    (window.location.protocol === 'https:' ||
+      window.location.hostname === '127.0.0.1' ||
+      window.location.hostname === 'localhost')
+  ) {
     navigator.serviceWorker.register('./sw.js').catch((err) => {
       console.warn('[PWA] Service Worker não registrado:', err);
     });
@@ -99,25 +116,24 @@ function setupPwaInstall() {
       return;
     }
 
-    // Orientações claras para iPhone (Safari) e Android caso o prompt nativo não esteja disponível
     openModal({
       title: 'Instalar App — Santa Teresa',
       bodyHtml: `
         <div class="space-y-4 text-sm text-[#4E342E]">
-          <p>Você pode instalar a plataforma <strong>Gestão Pastoral - Santa Teresa</strong> diretamente na tela inicial do seu celular em modo aplicativo (tela cheia):</p>
+          <p>Instale a plataforma <strong>Gestão Pastoral - Santa Teresa</strong> na tela inicial do seu celular em modo aplicativo:</p>
           <div class="rounded-xl bg-[#FAF6F0] border border-[#E6DACE] p-4 space-y-2">
             <p class="font-extrabold text-[#3E2723] flex items-center gap-2">
               <i data-lucide="smartphone" class="w-4 h-4 text-[#B45309]"></i>
               No Android (Chrome / Edge)
             </p>
-            <p class="text-xs leading-relaxed">Toque no menu <strong>⋮</strong> (canto superior direito) e selecione <strong>"Instalar aplicativo"</strong> ou <strong>"Adicionar à tela inicial"</strong>.</p>
+            <p class="text-xs leading-relaxed">Toque no menu <strong>⋮</strong> e selecione <strong>"Instalar aplicativo"</strong> ou <strong>"Adicionar à tela inicial"</strong>.</p>
           </div>
           <div class="rounded-xl bg-[#FAF6F0] border border-[#E6DACE] p-4 space-y-2">
             <p class="font-extrabold text-[#3E2723] flex items-center gap-2">
               <i data-lucide="share" class="w-4 h-4 text-[#B45309]"></i>
               No iPhone / iPad (Safari)
             </p>
-            <p class="text-xs leading-relaxed">Toque no botão <strong>Compartilhar</strong> (ícone de quadrado com seta para cima) e escolha <strong>"Adicionar à Tela de Início"</strong>.</p>
+            <p class="text-xs leading-relaxed">Toque em <strong>Compartilhar</strong> e escolha <strong>"Adicionar à Tela de Início"</strong>.</p>
           </div>
           <div class="flex justify-end pt-1">
             <button type="button" id="close-pwa-guide" class="px-5 py-2 rounded-xl bg-[#3E2723] text-white text-xs font-bold">Entendi</button>
@@ -151,9 +167,7 @@ function describeUserScope(u, pastoralMap) {
     .map((m) => pastoralMap[m.pastoralId]?.shortName)
     .filter(Boolean);
 
-  if (coords.length > 0) {
-    return `Coord.: ${coords.join(' e ')}`;
-  }
+  if (coords.length > 0) return `Coord.: ${coords.join(' e ')}`;
   return members.length ? `Membro: ${members.join(', ')}` : 'Membro';
 }
 
@@ -186,6 +200,18 @@ function bindGlobalEvents() {
   document.getElementById('close-sidebar-btn')?.addEventListener('click', () => setMobileSidebar(false));
   document.getElementById('sidebar-backdrop')?.addEventListener('click', () => setMobileSidebar(false));
 
+  // Meu Perfil ao clicar no avatar/nome do cabeçalho
+  document.getElementById('header-user-badge')?.addEventListener('click', () => {
+    if (!currentUser) return;
+    openMyProfileModal(currentUser, {
+      onProfileUpdated: (updated) => {
+        currentUser = updated;
+        renderHeader();
+        renderCurrentRoute();
+      },
+    });
+  });
+
   document.getElementById('logout-btn')?.addEventListener('click', () => {
     dataService.setSessionUserId(null);
     currentUser = null;
@@ -204,6 +230,7 @@ function bindGlobalEvents() {
   document.getElementById('login-form')?.addEventListener('submit', (e) => {
     e.preventDefault();
     const email = document.getElementById('login-email').value.trim().toLowerCase();
+    const password = document.getElementById('login-password').value;
     const errorEl = document.getElementById('login-error');
     const found = dataService.getUsers().find((u) => u.email.toLowerCase() === email);
 
@@ -214,6 +241,12 @@ function bindGlobalEvents() {
     }
     if (found.status !== 'Ativo') {
       errorEl.textContent = `Acesso indisponível: este usuário está com status "${found.status}".`;
+      errorEl.classList.remove('hidden');
+      return;
+    }
+    const expectedPass = found.password || 'pastoral2026';
+    if (password !== expectedPass) {
+      errorEl.textContent = 'Senha incorreta. (Dica de demonstração: pastoral2026 ou sua nova senha alterada em Meu Perfil).';
       errorEl.classList.remove('hidden');
       return;
     }
@@ -279,6 +312,11 @@ function showLoginScreen() {
   refreshIcons();
 }
 
+function getFallbackAllowedRoute(user, permissions) {
+  const firstAllowed = MENU_ITEMS.find((m) => !m.external && canAccessMenuItem(m, user, permissions));
+  return firstAllowed ? firstAllowed.id : 'notices';
+}
+
 function loginAs(user, { silent = false } = {}) {
   currentUser = user;
   dataService.setSessionUserId(user.id);
@@ -286,9 +324,10 @@ function loginAs(user, { silent = false } = {}) {
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app-shell').classList.remove('hidden');
 
+  const permissions = dataService.getPermissions();
   const activeMenuItem = MENU_ITEMS.find((m) => m.id === currentRoute);
-  if (!activeMenuItem || (activeMenuItem.coordOnly && !isAnyCoordinator(currentUser))) {
-    currentRoute = 'dashboard';
+  if (!activeMenuItem || !canAccessMenuItem(activeMenuItem, currentUser, permissions)) {
+    currentRoute = getFallbackAllowedRoute(currentUser, permissions);
   }
 
   renderHeader();
@@ -321,12 +360,13 @@ function renderHeader() {
       ${escapeHtml(getInitials(currentUser.name))}
     </div>
     <div class="flex items-center gap-1.5 min-w-0">
-      <span class="text-xs font-extrabold text-[#3E2723] truncate max-w-[95px] sm:max-w-[140px]">${escapeHtml(getFirstName(currentUser.name))}</span>
+      <span class="text-xs font-extrabold text-[#3E2723] truncate max-w-[90px] sm:max-w-[130px]">${escapeHtml(getFirstName(currentUser.name))}</span>
       <span class="text-[#D7C4B2] hidden sm:inline">•</span>
       <span class="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold border ${summary.badgeClass}">
         ${escapeHtml(summary.label)}
       </span>
     </div>
+    <i data-lucide="user-cog" class="w-3.5 h-3.5 text-[#B45309] shrink-0 hidden sm:block"></i>
   `;
 
   const switcher = document.getElementById('quick-profile-switcher');
@@ -345,15 +385,18 @@ function renderHeader() {
       return `<option value="${u.id}" ${u.id === currentUser.id ? 'selected' : ''}>${escapeHtml(shortLabel)}</option>`;
     })
     .join('');
+
+  refreshIcons();
 }
 
 function renderSidebar() {
   if (!currentUser) return;
   const nav = document.getElementById('sidebar-nav');
+  const permissions = dataService.getPermissions();
   const anyCoord = isAnyCoordinator(currentUser);
   const settings = dataService.getSettings();
 
-  const visibleItems = MENU_ITEMS.filter((item) => !item.coordOnly || anyCoord);
+  const visibleItems = MENU_ITEMS.filter((item) => canAccessMenuItem(item, currentUser, permissions));
 
   nav.innerHTML = visibleItems
     .map((item) => {
@@ -393,8 +436,8 @@ function renderSidebar() {
             <span class="truncate">${escapeHtml(item.label)}</span>
           </span>
           ${
-            item.coordOnly
-              ? `<span class="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-400/25 font-bold">${isGeneralAdmin(currentUser) ? 'Admin' : 'Coord'}</span>`
+            item.badge
+              ? `<span class="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-400/25 font-bold">${escapeHtml(item.badge)}</span>`
               : ''
           }
         </button>
@@ -420,12 +463,11 @@ function openInstagramModal() {
     bodyHtml: `
       <form id="ig-form" class="space-y-4">
         <p class="text-sm text-[#5D4037]">
-          Defina o endereço oficial do Instagram da Paróquia Santa Teresa d'Ávila. O link abrirá em nova aba.
+          Defina o endereço oficial do Instagram da Paróquia Santa Teresa d'Ávila.
         </p>
         <div>
           <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">URL do Instagram *</label>
           <input name="instagramUrl" type="url" required value="${escapeHtml(settings.instagramUrl || 'https://www.instagram.com/')}"
-            placeholder="https://www.instagram.com/paroquiasantateresa"
             class="w-full px-3.5 py-2.5 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">
         </div>
         <div class="flex justify-end gap-2 pt-2">
@@ -449,11 +491,12 @@ function openInstagramModal() {
 }
 
 function navigate(routeId) {
+  const permissions = dataService.getPermissions();
   const item = MENU_ITEMS.find((m) => m.id === routeId);
   if (!item || item.external) return;
-  if (item.coordOnly && !isAnyCoordinator(currentUser)) {
-    showToast('Este módulo é exclusivo da Coordenação.', 'error');
-    currentRoute = 'dashboard';
+  if (!canAccessMenuItem(item, currentUser, permissions)) {
+    showToast('Você não tem permissão para acessar este módulo.', 'error');
+    currentRoute = getFallbackAllowedRoute(currentUser, permissions);
   } else {
     if (routeId === 'schedules' && currentRoute !== 'schedules') {
       resetSchedulesTab();
@@ -470,12 +513,19 @@ function renderCurrentRoute() {
   const freshUser = dataService.getUserById(currentUser.id);
   if (freshUser) currentUser = freshUser;
 
+  const permissions = dataService.getPermissions();
   const meta = MENU_ITEMS.find((m) => m.id === currentRoute) || MENU_ITEMS[0];
-  setHeaderContext(meta.label, meta.subtitle);
+  if (!canAccessMenuItem(meta, currentUser, permissions)) {
+    currentRoute = getFallbackAllowedRoute(currentUser, permissions);
+  }
+
+  const activeMeta = MENU_ITEMS.find((m) => m.id === currentRoute) || MENU_ITEMS[0];
+  setHeaderContext(activeMeta.label, activeMeta.subtitle);
 
   const container = document.getElementById('main-content');
   const ctx = {
     user: currentUser,
+    permissions,
     navigate,
     setHeaderContext,
     onUsersChanged: () => renderHeader(),
@@ -483,11 +533,18 @@ function renderCurrentRoute() {
       renderHeader();
       renderSidebar();
     },
+    onPermissionsChanged: () => {
+      renderSidebar();
+      renderCurrentRoute();
+    },
   };
 
   switch (currentRoute) {
     case 'dashboard':
       renderDashboard(container, ctx);
+      break;
+    case 'my_dates':
+      renderMyDates(container, ctx);
       break;
     case 'users':
       renderUsers(container, ctx);
@@ -518,6 +575,9 @@ function renderCurrentRoute() {
       break;
     case 'responses':
       renderResponses(container, ctx);
+      break;
+    case 'permissions':
+      renderPermissions(container, ctx);
       break;
     default:
       renderDashboard(container, ctx);

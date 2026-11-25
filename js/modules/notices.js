@@ -1,38 +1,52 @@
 /**
- * Módulo 9: Avisos Multi-Pastoral
- * - Feed cronológico com opção de "Fixado no Início"
- * - Isolamento: Coordenadores publicam, editam, fixam e excluem avisos APENAS
- *   das pastorais que coordenam (Coordenação Geral pode publicar avisos Paroquiais).
+ * Módulo 9: Avisos Segmentados por Pastoral (Vínculo N:N Estrito)
+ * - Seleção obrigatória de 1 ou mais pastorais (listando apenas pastorais coordenadas;
+ *   "Toda a Paróquia" exclusivo da Coordenação Geral).
+ * - Visibilidade estrita: usuário só visualiza avisos de suas pastorais ou "Toda a Paróquia".
+ * - Exibe tags coloridas de todas as pastorais vinculadas + filtro por pastoral no topo.
  */
 
 import { dataService } from '../services/dataService.js';
 import {
-  canManagePastoral,
+  canManageAnyOfPastorals,
   closeModal,
   escapeHtml,
   formatDateTimeBR,
   getCoordinatedPastoralIds,
   getMemberPastoralIds,
-  isAnyCoordinator,
+  hasPermission,
   isGeneralAdmin,
+  isPastoralScopedItemVisible,
   openModal,
   refreshIcons,
-  renderPastoralPill,
+  renderPastoralPillsList,
   showToast,
 } from '../utils/helpers.js';
 
-export function renderNotices(container, { user }) {
-  const anyCoord = isAnyCoordinator(user);
+let noticePastoralFilter = 'all';
+
+export function renderNotices(container, { user, permissions }) {
   const generalAdmin = isGeneralAdmin(user);
+  const canPublish = hasPermission(user, 'notices_publish', permissions);
   const pastorals = dataService.getPastorals();
   const pastoralMap = Object.fromEntries(pastorals.map((p) => [p.id, p]));
-  const accessibleIds = new Set(getMemberPastoralIds(user, pastorals));
+  const accessibleIds = getMemberPastoralIds(user, pastorals);
+  const accessiblePastorals = pastorals.filter((p) => accessibleIds.includes(p.id));
   const users = dataService.getUsers();
   const userMap = Object.fromEntries(users.map((u) => [u.id, u]));
 
-  const notices = dataService
+  if (noticePastoralFilter !== 'all' && !accessibleIds.includes(noticePastoralFilter)) {
+    noticePastoralFilter = 'all';
+  }
+
+  const visibleNotices = dataService
     .getNotices()
-    .filter((n) => generalAdmin || n.pastoralId === 'all' || accessibleIds.has(n.pastoralId))
+    .filter((n) => isPastoralScopedItemVisible(n.pastoralIds, user, pastorals))
+    .filter((n) => {
+      if (noticePastoralFilter === 'all') return true;
+      const pids = n.pastoralIds || ['all'];
+      return pids.includes('all') || pids.includes(noticePastoralFilter);
+    })
     .sort((a, b) => {
       if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
       return String(b.createdAt).localeCompare(String(a.createdAt));
@@ -44,11 +58,11 @@ export function renderNotices(container, { user }) {
         <div>
           <h3 class="text-xl font-extrabold text-[#3E2723]">Mural de Avisos</h3>
           <p class="text-sm text-[#6D4C41] mt-0.5">
-            Comunicados paroquiais e das pastorais em que você participa. Avisos fixados aparecem em destaque no Início.
+            Comunicados paroquiais e das pastorais das quais você faz parte.
           </p>
         </div>
         ${
-          anyCoord
+          canPublish
             ? `
           <button id="btn-new-notice" type="button"
             class="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#3E2723] hover:bg-[#5D4037] text-white text-sm font-semibold shadow-sm transition shrink-0">
@@ -60,20 +74,40 @@ export function renderNotices(container, { user }) {
         }
       </div>
 
+      <!-- Filtro por Pastoral -->
+      <div class="flex items-center gap-2 flex-wrap">
+        <button type="button" data-notice-filter="all"
+          class="px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition ${
+            noticePastoralFilter === 'all' ? 'bg-[#3E2723] text-white border-[#3E2723]' : 'bg-white text-[#5D4037] border-[#E6DACE] hover:bg-[#FDFBF7]'
+          }">Todas as minhas pastorais</button>
+        ${accessiblePastorals
+          .map(
+            (p) => `
+          <button type="button" data-notice-filter="${p.id}"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition ${
+              noticePastoralFilter === p.id ? 'bg-[#3E2723] text-white border-[#3E2723]' : 'bg-white text-[#5D4037] border-[#E6DACE] hover:bg-[#FDFBF7]'
+            }">
+            <span class="w-2 h-2 rounded-full" style="background-color:${escapeHtml(p.color)};"></span>
+            ${escapeHtml(p.shortName)}
+          </button>
+        `,
+          )
+          .join('')}
+      </div>
+
       ${
-        notices.length === 0
+        visibleNotices.length === 0
           ? `
         <div class="bg-white rounded-2xl border border-dashed border-[#D7C4B2] p-10 text-center text-[#6D4C41]">
-          Nenhum aviso publicado no momento.
+          Nenhum aviso publicado para este filtro no momento.
         </div>
       `
           : `
         <div class="space-y-4">
-          ${notices
+          ${visibleNotices
             .map((not) => {
               const author = userMap[not.authorId]?.name || 'Coordenação';
-              const canManage = generalAdmin || canManagePastoral(user, not.pastoralId);
-              const pastoral = not.pastoralId === 'all' ? null : pastoralMap[not.pastoralId];
+              const canManage = canPublish && (generalAdmin || canManageAnyOfPastorals(user, not.pastoralIds));
               return `
                 <article class="rounded-2xl border-2 ${
                   not.pinned
@@ -82,7 +116,7 @@ export function renderNotices(container, { user }) {
                 } p-5 transition">
                   <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                     <div class="space-y-1.5 flex-1">
-                      <div class="flex items-center gap-2 flex-wrap">
+                      <div class="flex items-center gap-1.5 flex-wrap">
                         ${
                           not.pinned
                             ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-[#D97706] text-white">
@@ -91,7 +125,7 @@ export function renderNotices(container, { user }) {
                               </span>`
                             : ''
                         }
-                        ${renderPastoralPill(pastoral, { compact: true })}
+                        ${renderPastoralPillsList(not.pastoralIds, pastoralMap, { compact: true })}
                         <span class="text-xs text-[#8D6E63] font-medium">${escapeHtml(formatDateTimeBR(not.createdAt))}</span>
                       </div>
                       <h4 class="text-base sm:text-lg font-extrabold text-[#3E2723]">${escapeHtml(not.title)}</h4>
@@ -135,22 +169,29 @@ export function renderNotices(container, { user }) {
     </div>
   `;
 
+  container.querySelectorAll('[data-notice-filter]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      noticePastoralFilter = btn.dataset.noticeFilter;
+      renderNotices(container, { user, permissions });
+    });
+  });
+
   container.querySelector('#btn-new-notice')?.addEventListener('click', () => {
-    openNoticeModal(null, user, () => renderNotices(container, { user }));
+    openNoticeModal(null, user, () => renderNotices(container, { user, permissions }));
   });
 
   container.querySelectorAll('[data-pin-notice]').forEach((btn) => {
     btn.addEventListener('click', () => {
       dataService.togglePinNotice(btn.dataset.pinNotice);
       showToast('Destaque na tela inicial atualizado!');
-      renderNotices(container, { user });
+      renderNotices(container, { user, permissions });
     });
   });
 
   container.querySelectorAll('[data-edit-notice]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const not = dataService.getNotices().find((n) => n.id === btn.dataset.editNotice);
-      if (not) openNoticeModal(not, user, () => renderNotices(container, { user }));
+      if (not) openNoticeModal(not, user, () => renderNotices(container, { user, permissions }));
     });
   });
 
@@ -159,7 +200,7 @@ export function renderNotices(container, { user }) {
       if (!confirm('Deseja excluir este aviso?')) return;
       dataService.deleteNotice(btn.dataset.deleteNotice);
       showToast('Aviso excluído.');
-      renderNotices(container, { user });
+      renderNotices(container, { user, permissions });
     });
   });
 
@@ -167,24 +208,44 @@ export function renderNotices(container, { user }) {
 }
 
 function openNoticeModal(existing, user, onSaved) {
+  const generalAdmin = isGeneralAdmin(user);
   const pastorals = dataService.getActivePastorals();
   const managedIds = new Set(getCoordinatedPastoralIds(user, pastorals));
-  const managedPastorals = pastorals.filter((p) => managedIds.has(p.id));
-  const generalAdmin = isGeneralAdmin(user);
+  const selectablePastorals = pastorals.filter((p) => managedIds.has(p.id));
+  const initialTargets = existing?.pastoralIds || (generalAdmin ? ['all'] : selectablePastorals.slice(0, 1).map((p) => p.id));
 
   openModal({
-    title: existing ? 'Editar Aviso' : 'Publicar Novo Aviso',
+    title: existing ? 'Editar Aviso' : 'Publicar Novo Aviso Segmentado',
     bodyHtml: `
       <form id="notice-form" class="space-y-4">
-        <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Pastoral de Destino *</label>
-          <select name="pastoralId" class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm outline-none focus:border-[#B45309]">
-            ${generalAdmin ? `<option value="all" ${existing?.pastoralId === 'all' ? 'selected' : ''}>Todas as Pastorais (Aviso Paroquial)</option>` : ''}
-            ${managedPastorals
-              .map((p) => `<option value="${p.id}" ${existing?.pastoralId === p.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`)
+        <div class="p-3.5 rounded-xl bg-[#FAF6F0] border border-[#E6DACE] space-y-2">
+          <label class="block text-xs font-bold uppercase tracking-wider text-[#3E2723]">Pastorais de Destino (Obrigatório) *</label>
+          <p class="text-[11px] text-[#6D4C41]">O comunicado ficará visível apenas para as pastorais marcadas (incluindo no mural do Início).</p>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+            ${
+              generalAdmin
+                ? `
+              <label class="inline-flex items-center gap-2 text-xs font-extrabold text-[#92400E] cursor-pointer sm:col-span-2">
+                <input id="notice-target-all" type="checkbox" name="pastoralIds" value="all" ${initialTargets.includes('all') ? 'checked' : ''} class="rounded text-[#B45309]">
+                Toda a Paróquia (aviso geral)
+              </label>
+            `
+                : ''
+            }
+            ${selectablePastorals
+              .map(
+                (p) => `
+              <label class="inline-flex items-center gap-2 text-xs font-semibold text-[#3E2723] cursor-pointer">
+                <input type="checkbox" class="notice-target-pid rounded text-[#B45309]" name="pastoralIds" value="${p.id}" ${initialTargets.includes(p.id) ? 'checked' : ''}>
+                <span class="w-2 h-2 rounded-full" style="background-color:${escapeHtml(p.color)};"></span>
+                ${escapeHtml(p.shortName)}
+              </label>
+            `,
+              )
               .join('')}
-          </select>
+          </div>
         </div>
+
         <div>
           <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Título do Comunicado *</label>
           <input name="title" required value="${escapeHtml(existing?.title || '')}" placeholder="Ex: Ensaio para a Festa de Santa Teresa"
@@ -206,13 +267,31 @@ function openNoticeModal(existing, user, onSaved) {
       </form>
     `,
     onMount(bodyEl) {
+      const allChk = bodyEl.querySelector('#notice-target-all');
+      const pidChks = bodyEl.querySelectorAll('.notice-target-pid');
+      if (allChk) {
+        allChk.addEventListener('change', () => {
+          if (allChk.checked) pidChks.forEach((c) => { c.checked = false; });
+        });
+        pidChks.forEach((c) => {
+          c.addEventListener('change', () => {
+            if (c.checked) allChk.checked = false;
+          });
+        });
+      }
+
       bodyEl.querySelector('#cancel-notice-btn').addEventListener('click', closeModal);
       bodyEl.querySelector('#notice-form').addEventListener('submit', (e) => {
         e.preventDefault();
         const fd = new FormData(e.target);
+        const pastoralIds = fd.getAll('pastoralIds');
+        if (pastoralIds.length === 0) {
+          showToast('Selecione obrigatoriamente pelo menos uma pastoral de destino.', 'error');
+          return;
+        }
         dataService.saveNotice({
           id: existing?.id,
-          pastoralId: fd.get('pastoralId'),
+          pastoralIds,
           title: String(fd.get('title')).trim(),
           content: String(fd.get('content')).trim(),
           authorId: existing?.authorId || user.id,
