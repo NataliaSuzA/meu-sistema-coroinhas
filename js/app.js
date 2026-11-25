@@ -1,9 +1,9 @@
 /**
- * Controlador principal v4 — Paróquia Santa Teresa d'Ávila • Gestão Pastoral
- * - Liturgia Diária + Roteiro do Celebrante
- * - Locais + Tipos de Celebração
- * - Central de Notificações (Sino no cabeçalho) + Lembretes Internos de Formulários
- * - Meu Perfil + Matriz Dinâmica de Permissões + PWA
+ * Controlador principal v5 — Paróquia Santa Teresa d'Ávila • Gestão Pastoral
+ * - Contas Compartilhadas / Familiares (irmãos na mesma conta) com selo no cabeçalho
+ * - Fluxo Completo de Aceite e Cancelamento de Substituições integrado ao Sino
+ * - Liturgia Diária diretamente da Paulus (paulus.com.br) + OE exata + Roteiro do Celebrante
+ * - Locais, Tipos de Celebração, Permissões Dinâmicas, Meu Perfil e PWA
  */
 
 import { dataService } from './services/dataService.js';
@@ -17,10 +17,12 @@ import {
   getUserRoleSummary,
   hasPermission,
   isAnyCoordinator,
+  isFamilyAccount,
   isFormClosed,
   isGeneralAdmin,
   openModal,
   refreshIcons,
+  renderFamilyAccountBadge,
   showToast,
 } from './utils/helpers.js';
 
@@ -33,7 +35,7 @@ import { renderLocations } from './modules/locations.js';
 import { renderCelebrationTypes } from './modules/celebrationTypes.js';
 import { renderUsers } from './modules/users.js';
 import { renderAgenda } from './modules/agenda.js';
-import { renderSchedules, resetSchedulesTab } from './modules/schedules.js';
+import { renderSchedules, resetSchedulesTab, setSchedulesTab } from './modules/schedules.js';
 import { renderRoles } from './modules/roles.js';
 import { renderForms, queueAutoOpenForm } from './modules/forms.js';
 import { renderNotes } from './modules/notes.js';
@@ -44,9 +46,9 @@ import { renderResponses } from './modules/responses.js';
 
 const MENU_ITEMS = [
   { id: 'dashboard', label: 'Início', subtitle: 'Visão Geral das Pastorais', icon: 'layout-dashboard', permKey: 'dashboard' },
-  { id: 'liturgy', label: 'Liturgia Diária', subtitle: 'Leituras, Orações Eucarísticas e Roteiro do Celebrante', icon: 'book-open', permKey: 'liturgy' },
+  { id: 'liturgy', label: 'Liturgia Diária', subtitle: 'Leituras da Paulus, Orações Eucarísticas e Roteiro do Celebrante', icon: 'book-open', permKey: 'liturgy' },
   { id: 'my_dates', label: 'Minhas Datas', subtitle: 'Seus compromissos pessoais em ordem cronológica', icon: 'calendar-clock', permKey: 'my_dates' },
-  { id: 'users', label: 'Gestão de Usuários', subtitle: 'Cadastro de membros e vínculos N:N com pastorais', icon: 'users', permKey: 'users', badge: 'Gestão' },
+  { id: 'users', label: 'Gestão de Usuários', subtitle: 'Cadastro de membros, contas familiares e vínculos N:N', icon: 'users', permKey: 'users', badge: 'Gestão' },
   { id: 'agenda', label: 'Agenda', subtitle: 'Calendário unificado com suas escalas e eventos', icon: 'calendar-days', permKey: 'agenda' },
   { id: 'schedules', label: 'Escalas', subtitle: 'Visão Geral das Pastorais', icon: 'calendar-check-2', permKey: 'schedules_view' },
   { id: 'roles', label: 'Pastorais & Funções', subtitle: 'Cadastro de pastorais e funções vinculadas (1:N)', icon: 'sliders-horizontal', permKey: 'roles', badge: 'Gestão' },
@@ -55,8 +57,8 @@ const MENU_ITEMS = [
   { id: 'forms', label: 'Formulários', subtitle: 'Pesquisas segmentadas por pastoral e prazo', icon: 'clipboard-list', permAny: ['forms_answer', 'forms_manage'] },
   { id: 'notes', label: 'Bloco de Notas', subtitle: 'Mural segmentado de orientações por pastoral', icon: 'notebook-pen', permKey: 'notes' },
   { id: 'notices', label: 'Avisos', subtitle: 'Comunicados paroquiais e das suas pastorais', icon: 'megaphone' },
-  { id: 'birthdays', label: 'Aniversariantes', subtitle: 'Aniversariantes do mês e Mural de Parabéns', icon: 'cake', permKey: 'birthdays' },
-  { id: 'attendance', label: 'Presença', subtitle: 'Chamadas e indicador de frequência', icon: 'check-square', permAny: ['attendance_manage', 'attendance_self'] },
+  { id: 'birthdays', label: 'Aniversariantes', subtitle: 'Aniversariantes individuais e Mural de Parabéns', icon: 'cake', permKey: 'birthdays' },
+  { id: 'attendance', label: 'Presença', subtitle: 'Chamadas individuais e indicador de frequência', icon: 'check-square', permAny: ['attendance_manage', 'attendance_self'] },
   { id: 'responses', label: 'Respostas', subtitle: 'Adesão, validação, lembretes internos e CSV/Excel', icon: 'bar-chart-3', permKey: 'responses', badge: 'Gestão' },
   { id: 'permissions', label: 'Permissões e Acessos', subtitle: 'Matriz dinâmica de permissões por perfil', icon: 'shield-check', adminOnly: true, badge: 'Admin' },
   { id: 'instagram', label: 'Instagram', subtitle: 'Perfil oficial da paróquia', icon: 'instagram', external: true },
@@ -157,10 +159,10 @@ function setupPwaInstall() {
 
 function getDemoProfiles() {
   const users = dataService.getUsers();
-  const preferredIds = ['usr_admin', 'usr_natalia', 'usr_carlos', 'usr_joao'];
+  const preferredIds = ['usr_admin', 'usr_natalia', 'usr_carlos', 'usr_familia_silva', 'usr_gabriel', 'usr_lucas'];
   const list = preferredIds.map((id) => users.find((u) => u.id === id)).filter(Boolean);
   if (list.length > 0) return list;
-  return users.filter((u) => u.status === 'Ativo').slice(0, 4);
+  return users.filter((u) => u.status === 'Ativo').slice(0, 6);
 }
 
 function describeUserScope(u, pastoralMap) {
@@ -175,8 +177,9 @@ function describeUserScope(u, pastoralMap) {
     .map((m) => pastoralMap[m.pastoralId]?.shortName)
     .filter(Boolean);
 
-  if (coords.length > 0) return `Coord.: ${coords.join(' e ')}`;
-  return members.length ? `Membro: ${members.join(', ')}` : 'Membro';
+  const famNote = isFamilyAccount(u) ? ' • Conta Familiar' : '';
+  if (coords.length > 0) return `Coord.: ${coords.join(' e ')}${famNote}`;
+  return members.length ? `Membro: ${members.join(', ')}${famNote}` : `Membro${famNote}`;
 }
 
 function init() {
@@ -241,20 +244,25 @@ function renderNotificationsBell() {
                 const senderName = userMap[n.senderUserId]?.name || 'Coordenação';
                 const form = n.formId ? forms.find((f) => f.id === n.formId) : null;
                 const canAnswerNow = n.type === 'form_reminder' && !n.completed && form && !isFormClosed(form);
+                const isOpenSub = n.type === 'substitution_open' && !n.completed;
+                const isConfirmedSub = n.type === 'substitution_confirmed';
+
+                const statusPill = isConfirmedSub
+                  ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 bg-emerald-100 text-emerald-800 border border-emerald-300">Confirmada</span>`
+                  : n.completed
+                    ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 bg-emerald-50 text-emerald-800 border border-emerald-200">Concluído</span>`
+                    : isOpenSub
+                      ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 bg-red-100 text-red-700 border border-red-300">Em Aberto</span>`
+                      : `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 bg-amber-100 text-[#92400E] border border-amber-300">Pendente</span>`;
+
                 return `
-                  <div class="p-3.5 ${!n.read && !n.completed ? 'bg-amber-50/70' : 'bg-white'} space-y-2">
+                  <div class="p-3.5 ${!n.read && !n.completed ? (isConfirmedSub ? 'bg-emerald-50/70' : 'bg-amber-50/70') : 'bg-white'} space-y-2">
                     <div class="flex items-start justify-between gap-2">
                       <p class="text-xs font-extrabold text-[#3E2723] flex items-center gap-1.5">
-                        ${!n.read && !n.completed ? '<span class="w-2 h-2 rounded-full bg-red-600 shrink-0"></span>' : ''}
+                        ${!n.read && !n.completed ? `<span class="w-2 h-2 rounded-full ${isConfirmedSub ? 'bg-emerald-600' : 'bg-red-600'} shrink-0"></span>` : ''}
                         ${escapeHtml(n.title)}
                       </p>
-                      <span class="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
-                        n.completed
-                          ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                          : 'bg-amber-100 text-[#92400E] border border-amber-300'
-                      }">
-                        ${n.completed ? 'Concluído' : 'Pendente'}
-                      </span>
+                      ${statusPill}
                     </div>
                     <p class="text-xs text-[#5D4037] leading-relaxed">${escapeHtml(n.message)}</p>
                     <div class="flex items-center justify-between gap-2 pt-0.5">
@@ -265,7 +273,17 @@ function renderNotificationsBell() {
                               class="px-2.5 py-1 rounded-lg bg-[#3E2723] hover:bg-[#5D4037] text-amber-300 text-[11px] font-bold transition">
                               Responder Agora
                             </button>`
-                          : ''
+                          : isOpenSub
+                            ? `<button type="button" data-bell-open-sub="${n.pastoralId || 'my_dates'}" data-bell-notif-id="${n.id}"
+                                class="px-2.5 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold transition">
+                                Ver / Assumir
+                              </button>`
+                            : isConfirmedSub
+                              ? `<button type="button" data-bell-open-sub="${n.pastoralId || 'my_dates'}" data-bell-notif-id="${n.id}"
+                                  class="px-2.5 py-1 rounded-lg bg-[#3E2723] hover:bg-[#5D4037] text-amber-300 text-[11px] font-bold transition">
+                                  Ver Escala
+                                </button>`
+                              : ''
                       }
                     </div>
                   </div>
@@ -286,6 +304,16 @@ function renderNotificationsBell() {
       dataService.markNotificationRead(btn.dataset.bellNotifId);
       closeNotificationsPopover();
       openFormDirectly(btn.dataset.bellAnswerForm);
+    });
+  });
+
+  popover.querySelectorAll('[data-bell-open-sub]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      dataService.markNotificationRead(btn.dataset.bellNotifId);
+      closeNotificationsPopover();
+      renderNotificationsBell();
+      setSchedulesTab(btn.dataset.bellOpenSub);
+      navigate('schedules', { preserveSchedulesTab: true });
     });
   });
 
@@ -314,7 +342,6 @@ function bindGlobalEvents() {
     }
   });
 
-  // Sino de Notificações
   document.getElementById('notifications-bell-btn')?.addEventListener('click', (e) => {
     e.stopPropagation();
     const pop = document.getElementById('notifications-popover');
@@ -424,13 +451,14 @@ function showLoginScreen() {
     .map((u) => {
       const summary = getUserRoleSummary(u, pastorals);
       const scope = describeUserScope(u, pastoralMap);
+      const isFam = isFamilyAccount(u);
       return `
         <button type="button" data-quick-login="${u.id}"
           class="text-left p-3 rounded-xl border border-[#E6DACE] bg-[#FDFBF7] hover:border-[#D97706] hover:bg-amber-50/50 transition group">
           <div class="flex items-center justify-between gap-2 mb-1">
             <div class="flex items-center gap-2 min-w-0">
-              <span class="w-7 h-7 rounded-lg bg-[#3E2723] text-amber-400 text-[11px] font-extrabold flex items-center justify-center shrink-0">
-                ${escapeHtml(getInitials(u.name))}
+              <span class="w-7 h-7 rounded-lg ${isFam ? 'bg-[#B45309] text-white' : 'bg-[#3E2723] text-amber-400'} text-[11px] font-extrabold flex items-center justify-center shrink-0">
+                ${isFam ? '<i data-lucide="users" class="w-3.5 h-3.5"></i>' : escapeHtml(getInitials(u.name))}
               </span>
               <span class="text-xs font-extrabold text-[#3E2723] truncate">${escapeHtml(u.name.split(' ').slice(0, 2).join(' '))}</span>
             </div>
@@ -480,7 +508,7 @@ function loginAs(user, { silent = false } = {}) {
   if (!silent) {
     const pastorals = dataService.getPastorals();
     const summary = getUserRoleSummary(user, pastorals);
-    showToast(`Conectado como ${getFirstName(user.name)} (${summary.label}).`, 'info');
+    showToast(`Conectado como ${isFamilyAccount(user) ? user.name.split('(')[0].trim() : getFirstName(user.name)} (${summary.label}).`, 'info');
   }
 }
 
@@ -496,25 +524,30 @@ function renderHeader() {
   const pastorals = dataService.getPastorals();
   const pastoralMap = Object.fromEntries(pastorals.map((p) => [p.id, p]));
   const summary = getUserRoleSummary(currentUser, pastorals);
+  const isFam = isFamilyAccount(currentUser);
 
   const badgeEl = document.getElementById('header-user-badge');
   badgeEl.innerHTML = `
-    <div class="w-7 h-7 rounded-lg bg-[#3E2723] text-amber-400 text-[11px] font-extrabold flex items-center justify-center shrink-0">
-      ${escapeHtml(getInitials(currentUser.name))}
+    <div class="w-7 h-7 rounded-lg ${isFam ? 'bg-[#B45309] text-white' : 'bg-[#3E2723] text-amber-400'} text-[11px] font-extrabold flex items-center justify-center shrink-0">
+      ${isFam ? '<i data-lucide="users" class="w-3.5 h-3.5"></i>' : escapeHtml(getInitials(currentUser.name))}
     </div>
     <div class="flex items-center gap-1.5 min-w-0">
-      <span class="text-xs font-extrabold text-[#3E2723] truncate max-w-[90px] sm:max-w-[130px]">${escapeHtml(getFirstName(currentUser.name))}</span>
-      <span class="text-[#D7C4B2] hidden sm:inline">•</span>
-      <span class="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold border ${summary.badgeClass}">
-        ${escapeHtml(summary.label)}
-      </span>
+      <span class="text-xs font-extrabold text-[#3E2723] truncate max-w-[90px] sm:max-w-[130px]">${escapeHtml(isFam ? currentUser.name.split('(')[0].trim() : getFirstName(currentUser.name))}</span>
+      ${
+        isFam
+          ? renderFamilyAccountBadge(currentUser, { compact: true })
+          : `<span class="text-[#D7C4B2] hidden sm:inline">•</span>
+             <span class="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold border ${summary.badgeClass}">
+               ${escapeHtml(summary.label)}
+             </span>`
+      }
     </div>
     <i data-lucide="user-cog" class="w-3.5 h-3.5 text-[#B45309] shrink-0 hidden sm:block"></i>
   `;
 
   const switcher = document.getElementById('quick-profile-switcher');
   const activeUsers = dataService.getUsers().filter((u) => u.status === 'Ativo');
-  const demoOrder = ['usr_admin', 'usr_natalia', 'usr_carlos', 'usr_joao'];
+  const demoOrder = ['usr_admin', 'usr_natalia', 'usr_carlos', 'usr_familia_silva', 'usr_gabriel', 'usr_lucas', 'usr_joao'];
   const demoSet = new Set(demoOrder);
   const sorted = [
     ...demoOrder.map((id) => activeUsers.find((u) => u.id === id)).filter(Boolean),
@@ -524,7 +557,8 @@ function renderHeader() {
   switcher.innerHTML = sorted
     .map((u) => {
       const scope = describeUserScope(u, pastoralMap);
-      const shortLabel = `${u.name.split(' ')[0]} — ${scope}`;
+      const displayName = isFamilyAccount(u) ? u.name.split('(')[0].trim() : u.name.split(' ')[0];
+      const shortLabel = `${displayName} — ${scope}`;
       return `<option value="${u.id}" ${u.id === currentUser.id ? 'selected' : ''}>${escapeHtml(shortLabel)}</option>`;
     })
     .join('');
@@ -630,7 +664,7 @@ function openInstagramModal() {
   });
 }
 
-function navigate(routeId) {
+function navigate(routeId, { preserveSchedulesTab = false } = {}) {
   const permissions = dataService.getPermissions();
   const item = MENU_ITEMS.find((m) => m.id === routeId);
   if (!item || item.external) return;
@@ -638,7 +672,7 @@ function navigate(routeId) {
     showToast('Você não tem permissão para acessar este módulo.', 'error');
     currentRoute = getFallbackAllowedRoute(currentUser, permissions);
   } else {
-    if (routeId === 'schedules' && currentRoute !== 'schedules') {
+    if (routeId === 'schedules' && currentRoute !== 'schedules' && !preserveSchedulesTab) {
       resetSchedulesTab();
     }
     currentRoute = routeId;

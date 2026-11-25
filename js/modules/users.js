@@ -1,11 +1,9 @@
 /**
- * Módulo 4: Gestão de Usuários Multi-Pastoral (Relacionamento N:N)
- * - Permite vincular uma mesma pessoa a uma ou mais pastorais simultaneamente,
- *   definindo em cada vínculo se atua como Coordenador(a) ou Membro.
- * - Isolamento de governança:
- *   * Coordenação Geral vê e gerencia todos os usuários, pastorais e o perfil Admin Paroquial.
- *   * Coordenador de Pastoral gerencia apenas vínculos nas pastorais que coordena
- *     (preservando intactos os vínculos daquela pessoa em outras pastorais).
+ * Módulo 4: Gestão de Usuários Multi-Pastoral (Relacionamento N:N) + Contas Familiares
+ * - Permite vincular uma mesma conta a uma ou mais pastorais simultaneamente (Coordenador/Membro).
+ * - Suporta Contas Compartilhadas / Familiares (1 ou mais irmãos na mesma conta de acesso,
+ *   cada qual com Nome Completo e Data de Nascimento próprios).
+ * - Isolamento de governança preservado para Coordenadores de Pastoral vs Coordenação Geral.
  */
 
 import { dataService } from '../services/dataService.js';
@@ -13,13 +11,16 @@ import {
   closeModal,
   escapeHtml,
   formatDateBR,
+  getAccountMembers,
   getCoordinatedPastoralIds,
   getInitials,
   getStatusBadgeClass,
   getUserMemberships,
+  isFamilyAccount,
   isGeneralAdmin,
   openModal,
   refreshIcons,
+  renderFamilyAccountBadge,
   showToast,
 } from '../utils/helpers.js';
 
@@ -39,16 +40,18 @@ export function renderUsers(container, { user, onUsersChanged }) {
   }
 
   const allUsers = dataService.getUsers();
-  // Coordenador de pastoral vê membros das pastorais que coordena; Admin Geral vê todos
   const scopedUsers = generalAdmin
     ? allUsers
     : allUsers.filter((u) => getUserMemberships(u).some((m) => managedIds.has(m.pastoralId)));
 
+  const q = searchTerm.trim().toLowerCase();
   const filtered = scopedUsers.filter((u) => {
+    const members = getAccountMembers(u);
     const matchSearch =
-      !searchTerm ||
-      u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      u.email.toLowerCase().includes(searchTerm.toLowerCase());
+      !q ||
+      u.name.toLowerCase().includes(q) ||
+      u.email.toLowerCase().includes(q) ||
+      members.some((m) => m.name.toLowerCase().includes(q));
     const matchPastoral =
       filterPastoralId === 'all' ||
       getUserMemberships(u).some((m) => m.pastoralId === filterPastoralId);
@@ -60,19 +63,19 @@ export function renderUsers(container, { user, onUsersChanged }) {
     <div class="space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h3 class="text-xl font-extrabold text-[#3E2723]">Gestão de Usuários &amp; Vínculos</h3>
+          <h3 class="text-xl font-extrabold text-[#3E2723]">Gestão de Usuários &amp; Contas Familiares</h3>
           <p class="text-sm text-[#6D4C41] mt-0.5">
             ${
               generalAdmin
-                ? `${scopedUsers.length} membros cadastrados em toda a paróquia. Vincule cada pessoa a uma ou mais pastorais.`
-                : `Exibindo ${scopedUsers.length} membros vinculados às pastorais que você coordena (${managedPastorals.map((p) => p.shortName).join(', ')}).`
+                ? `${scopedUsers.length} contas cadastradas na paróquia. Cadastre membros individuais ou contas familiares (irmãos no mesmo acesso).`
+                : `Exibindo ${scopedUsers.length} contas vinculadas às pastorais que você coordena (${managedPastorals.map((p) => p.shortName).join(', ')}).`
             }
           </p>
         </div>
         <button id="btn-new-user" type="button"
           class="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#3E2723] hover:bg-[#5D4037] text-white text-sm font-semibold shadow-sm transition shrink-0">
           <i data-lucide="user-plus" class="w-4 h-4 text-amber-400"></i>
-          Novo Membro
+          Novo Membro / Família
         </button>
       </div>
 
@@ -80,7 +83,7 @@ export function renderUsers(container, { user, onUsersChanged }) {
       <div class="bg-white rounded-2xl border border-[#E6DACE] p-4 grid grid-cols-1 md:grid-cols-12 gap-3 shadow-xs">
         <div class="md:col-span-5 relative">
           <i data-lucide="search" class="w-4 h-4 text-[#8D6E63] absolute left-3.5 top-1/2 -translate-y-1/2"></i>
-          <input id="users-search" type="text" value="${escapeHtml(searchTerm)}" placeholder="Buscar por nome ou e-mail..."
+          <input id="users-search" type="text" value="${escapeHtml(searchTerm)}" placeholder="Buscar por nome, irmão ou e-mail..."
             class="w-full pl-10 pr-4 py-2 rounded-xl border border-[#E6DACE] bg-[#FAF6F0] focus:bg-white focus:border-[#B45309] text-sm outline-none transition">
         </div>
         <div class="md:col-span-4">
@@ -106,7 +109,7 @@ export function renderUsers(container, { user, onUsersChanged }) {
           <table class="w-full text-left border-collapse">
             <thead>
               <tr class="bg-[#FDFBF7] border-b border-[#E6DACE] text-[11px] font-bold uppercase tracking-wider text-[#6D4C41]">
-                <th class="px-5 py-3.5">Membro</th>
+                <th class="px-5 py-3.5">Conta / Integrantes</th>
                 <th class="px-4 py-3.5">Contato &amp; Nasc.</th>
                 <th class="px-4 py-3.5">Pastorais &amp; Papéis (N:N)</th>
                 <th class="px-4 py-3.5">Status</th>
@@ -126,22 +129,44 @@ export function renderUsers(container, { user, onUsersChanged }) {
                   : filtered
                       .map((u) => {
                         const memberships = getUserMemberships(u);
+                        const members = getAccountMembers(u);
+                        const isFam = isFamilyAccount(u);
                         return `
                           <tr class="hover:bg-[#FAF6F0]/80 transition">
                             <td class="px-5 py-3.5">
-                              <div class="flex items-center gap-3">
-                                <div class="w-9 h-9 rounded-full bg-[#3E2723] text-amber-400 font-bold text-xs flex items-center justify-center shrink-0">
-                                  ${escapeHtml(getInitials(u.name))}
+                              <div class="flex items-start gap-3">
+                                <div class="w-9 h-9 rounded-full ${isFam ? 'bg-[#B45309] text-white' : 'bg-[#3E2723] text-amber-400'} font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                                  ${isFam ? '<i data-lucide="users" class="w-4 h-4"></i>' : escapeHtml(getInitials(u.name))}
                                 </div>
                                 <div class="min-w-0">
-                                  <p class="font-bold text-[#3E2723] truncate">${escapeHtml(u.name)}</p>
+                                  <div class="flex items-center gap-1.5 flex-wrap">
+                                    <p class="font-bold text-[#3E2723] truncate">${escapeHtml(u.name)}</p>
+                                    ${renderFamilyAccountBadge(u, { compact: true })}
+                                  </div>
                                   <p class="text-xs text-[#8D6E63] truncate">${escapeHtml(u.email)}</p>
+                                  ${
+                                    isFam
+                                      ? `<div class="mt-1.5 flex flex-wrap gap-1">
+                                          ${members
+                                            .map(
+                                              (m) => `
+                                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#FAF6F0] border border-[#E6DACE] text-[10px] font-semibold text-[#4E342E]">
+                                              ${escapeHtml(m.name)} <span class="text-[#8D6E63]">(${escapeHtml(formatDateBR(m.birthDate))})</span>
+                                            </span>
+                                          `,
+                                            )
+                                            .join('')}
+                                        </div>`
+                                      : ''
+                                  }
                                 </div>
                               </div>
                             </td>
                             <td class="px-4 py-3.5 text-xs text-[#5D4037] whitespace-nowrap">
                               <p>${escapeHtml(u.phone || '—')}</p>
-                              <p class="text-[#8D6E63] mt-0.5">${escapeHtml(formatDateBR(u.birthDate))}</p>
+                              <p class="text-[#8D6E63] mt-0.5">
+                                ${isFam ? `${members.length} datas individuais` : escapeHtml(formatDateBR(u.birthDate))}
+                              </p>
                             </td>
                             <td class="px-4 py-3.5">
                               <div class="flex items-center gap-1.5 flex-wrap max-w-md">
@@ -243,9 +268,9 @@ export function renderUsers(container, { user, onUsersChanged }) {
 
   container.querySelectorAll('[data-delete-user]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      if (!confirm('Deseja realmente remover este membro do sistema?')) return;
+      if (!confirm('Deseja realmente remover esta conta do sistema?')) return;
       dataService.deleteUser(btn.dataset.deleteUser);
-      showToast('Usuário removido com sucesso.');
+      showToast('Conta removida com sucesso.');
       onUsersChanged?.();
       renderUsers(container, { user, onUsersChanged });
     });
@@ -264,45 +289,77 @@ function openUserModal(existing, actor, onSaved) {
   const existingMemberships = getUserMemberships(existing);
   const membershipByPastoral = Object.fromEntries(existingMemberships.map((m) => [m.pastoralId, m.role]));
   const otherPastoralsMemberships = existingMemberships.filter((m) => !managedIds.has(m.pastoralId));
+  const initialMembers = existing
+    ? getAccountMembers(existing)
+    : [{ id: '', name: '', birthDate: '' }];
 
   openModal({
-    title: existing ? 'Editar Membro & Vínculos Pastorais' : 'Cadastrar Novo Membro',
+    title: existing ? 'Editar Conta & Vínculos Pastorais' : 'Cadastrar Novo Membro / Conta Familiar',
     maxWidth: 'max-w-2xl',
     bodyHtml: `
       <form id="user-form" class="space-y-4">
-        <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Nome Completo *</label>
-          <input name="name" required value="${escapeHtml(existing?.name || '')}" placeholder="Ex: Ana Beatriz Silva"
-            class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">
+        <!-- Dados Únicos de Acesso da Conta -->
+        <div class="p-3.5 rounded-xl bg-[#FAF6F0] border border-[#E6DACE] space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-xs font-extrabold uppercase tracking-wider text-[#3E2723]">Dados de Acesso da Conta</span>
+            <span class="text-[11px] text-[#6D4C41]">Login único compartilhado entre irmãos</span>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">E-mail de Login *</label>
+              <input name="email" type="email" required value="${escapeHtml(existing?.email || '')}" placeholder="familia@santateresa.org.br"
+                class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm focus:border-[#B45309] outline-none">
+            </div>
+            <div>
+              <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Telefone / WhatsApp (Responsável) *</label>
+              <input name="phone" required value="${escapeHtml(existing?.phone || '')}" placeholder="(11) 99999-0000"
+                class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm focus:border-[#B45309] outline-none">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Senha de Acesso ${existing ? '(deixe vazio p/ manter)' : '*'}</label>
+              <input name="password" type="password" ${existing ? '' : 'required'} value="" placeholder="${existing ? '••••••••' : 'Ex: pastoral2026'}"
+                class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm focus:border-[#B45309] outline-none">
+            </div>
+            <div>
+              <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Status *</label>
+              <select name="status" class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm outline-none focus:border-[#B45309]">
+                ${['Ativo', 'Inativo', 'Bloqueado']
+                  .map((s) => `<option value="${s}" ${(existing?.status || 'Ativo') === s ? 'selected' : ''}>${s}</option>`)
+                  .join('')}
+              </select>
+            </div>
+          </div>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-          <div>
-            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">E-mail *</label>
-            <input name="email" type="email" required value="${escapeHtml(existing?.email || '')}" placeholder="membro@santateresa.org.br"
-              class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">
+        <!-- Integrantes da Conta (1 ou mais irmãos) -->
+        <div class="p-3.5 rounded-xl bg-amber-50/50 border border-amber-300/80 space-y-3">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div>
+              <span class="text-xs font-extrabold uppercase tracking-wider text-[#3E2723] flex items-center gap-1.5">
+                <i data-lucide="users" class="w-3.5 h-3.5 text-[#B45309]"></i>
+                Integrantes Vinculados à Conta
+              </span>
+              <p class="text-[11px] text-[#6D4C41]">Adicione irmãos na mesma conta: cada um terá escala, presença e aniversário individuais.</p>
+            </div>
+            <button id="btn-add-family-member" type="button"
+              class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#B45309] hover:bg-[#92400E] text-white transition">
+              <i data-lucide="user-plus" class="w-3.5 h-3.5"></i>
+              + Adicionar Irmão / Integrante
+            </button>
           </div>
-          <div>
-            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Telefone / WhatsApp *</label>
-            <input name="phone" required value="${escapeHtml(existing?.phone || '')}" placeholder="(11) 99999-0000"
-              class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">
-          </div>
-        </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-          <div>
-            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Data de Nascimento *</label>
-            <input name="birthDate" type="date" required value="${escapeHtml(existing?.birthDate || '')}"
-              class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">
+          <div id="family-title-wrap" class="${initialMembers.length > 1 ? '' : 'hidden'}">
+            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Nome da Conta Familiar (Opcional)</label>
+            <input name="accountName" value="${escapeHtml(initialMembers.length > 1 ? existing?.name || '' : '')}"
+              placeholder="Ex: Família Silva (Pedro Lucas & João Miguel)"
+              class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm focus:border-[#B45309] outline-none">
           </div>
-          <div>
-            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Status *</label>
-            <select name="status" class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm outline-none focus:border-[#B45309]">
-              ${['Ativo', 'Inativo', 'Bloqueado']
-                .map((s) => `<option value="${s}" ${(existing?.status || 'Ativo') === s ? 'selected' : ''}>${s}</option>`)
-                .join('')}
-            </select>
-          </div>
+
+          <div id="family-members-list" class="space-y-2.5"></div>
         </div>
 
         ${
@@ -323,7 +380,7 @@ function openUserModal(existing, actor, onSaved) {
             <p class="text-[11px] text-[#6D4C41]">
               ${
                 generalAdmin
-                  ? 'Marque uma ou mais pastorais e defina se esta pessoa atua como Coordenador(a) ou Membro em cada uma.'
+                  ? 'Marque uma ou mais pastorais e defina se esta conta atua como Coordenador(a) ou Membro em cada uma.'
                   : 'Você pode gerenciar os vínculos apenas nas pastorais sob sua coordenação.'
               }
             </p>
@@ -369,12 +426,66 @@ function openUserModal(existing, actor, onSaved) {
         <div class="flex justify-end gap-2 pt-3 border-t border-[#E6DACE]/80">
           <button type="button" id="cancel-user-btn" class="px-4 py-2 rounded-xl border border-[#E6DACE] text-sm font-semibold text-[#5D4037] hover:bg-[#FAF6F0]">Cancelar</button>
           <button type="submit" class="px-5 py-2 rounded-xl bg-[#3E2723] hover:bg-[#5D4037] text-white text-sm font-semibold transition">
-            ${existing ? 'Salvar Alterações' : 'Cadastrar Membro'}
+            ${existing ? 'Salvar Alterações' : 'Cadastrar'}
           </button>
         </div>
       </form>
     `,
     onMount(bodyEl) {
+      const fmList = bodyEl.querySelector('#family-members-list');
+      const fmTitleWrap = bodyEl.querySelector('#family-title-wrap');
+
+      function refreshFamilyRowLabels() {
+        const rows = Array.from(fmList.querySelectorAll('.family-member-row'));
+        fmTitleWrap.classList.toggle('hidden', rows.length <= 1);
+        rows.forEach((row, idx) => {
+          const lbl = row.querySelector('.fm-index-label');
+          if (lbl) lbl.textContent = `Integrante ${idx + 1}`;
+          const rmBtn = row.querySelector('.remove-fm-btn');
+          if (rmBtn) rmBtn.classList.toggle('hidden', rows.length <= 1);
+        });
+      }
+
+      function addFamilyMemberRow(preset = { id: '', name: '', birthDate: '' }) {
+        const row = document.createElement('div');
+        row.className = 'family-member-row p-3 rounded-xl bg-white border border-[#E6DACE] space-y-2';
+        row.dataset.memberId = preset.id || '';
+        row.innerHTML = `
+          <div class="flex items-center justify-between gap-2">
+            <span class="fm-index-label text-[11px] font-extrabold uppercase tracking-wider text-[#B45309]">Integrante</span>
+            <button type="button" class="remove-fm-btn inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-bold text-red-700 hover:bg-red-50 transition">
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              Remover
+            </button>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+            <div class="sm:col-span-7">
+              <label class="block text-[11px] font-bold text-[#5D4037] mb-1">Nome Completo / de Exibição *</label>
+              <input type="text" required class="fm-name w-full px-3 py-2 rounded-lg border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none"
+                placeholder="Ex: Pedro Lucas Silva" value="${escapeHtml(preset.name || '')}">
+            </div>
+            <div class="sm:col-span-5">
+              <label class="block text-[11px] font-bold text-[#5D4037] mb-1">Data de Nascimento *</label>
+              <input type="date" required class="fm-birth w-full px-3 py-2 rounded-lg border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none"
+                value="${escapeHtml(preset.birthDate || '')}">
+            </div>
+          </div>
+        `;
+        row.querySelector('.remove-fm-btn').addEventListener('click', () => {
+          row.remove();
+          refreshFamilyRowLabels();
+        });
+        fmList.appendChild(row);
+        refreshFamilyRowLabels();
+        refreshIcons();
+      }
+
+      initialMembers.forEach((m) => addFamilyMemberRow(m));
+
+      bodyEl.querySelector('#btn-add-family-member').addEventListener('click', () => {
+        addFamilyMemberRow({ id: '', name: '', birthDate: '' });
+      });
+
       bodyEl.querySelectorAll('.mem-check').forEach((chk) => {
         chk.addEventListener('change', () => {
           const sel = bodyEl.querySelector(`.mem-role[data-pid="${chk.dataset.pid}"]`);
@@ -387,6 +498,24 @@ function openUserModal(existing, actor, onSaved) {
       bodyEl.querySelector('#user-form').addEventListener('submit', (e) => {
         e.preventDefault();
         const fd = new FormData(e.target);
+
+        const familyMembers = [];
+        fmList.querySelectorAll('.family-member-row').forEach((row) => {
+          const name = row.querySelector('.fm-name').value.trim();
+          const birthDate = row.querySelector('.fm-birth').value;
+          if (name) {
+            familyMembers.push({
+              id: row.dataset.memberId || undefined,
+              name,
+              birthDate,
+            });
+          }
+        });
+
+        if (familyMembers.length === 0) {
+          showToast('Informe pelo menos um integrante na conta.', 'error');
+          return;
+        }
 
         const editedMemberships = [];
         bodyEl.querySelectorAll('.mem-check').forEach((chk) => {
@@ -403,23 +532,28 @@ function openUserModal(existing, actor, onSaved) {
         const finalMemberships = [...otherPastoralsMemberships, ...editedMemberships];
 
         if (!isAdminFlag && finalMemberships.length === 0) {
-          showToast('Vincule o membro a pelo menos uma pastoral.', 'error');
+          showToast('Vincule a conta a pelo menos uma pastoral.', 'error');
           return;
         }
 
+        const customAccountName = String(fd.get('accountName') || '').trim();
+        const passwordVal = String(fd.get('password') || '').trim();
+
         dataService.saveUser({
           id: existing?.id,
-          name: String(fd.get('name')).trim(),
+          name: familyMembers.length > 1 ? customAccountName : familyMembers[0].name,
           email: String(fd.get('email')).trim(),
           phone: String(fd.get('phone')).trim(),
-          birthDate: fd.get('birthDate'),
+          password: passwordVal || existing?.password || 'pastoral2026',
+          birthDate: familyMembers[0].birthDate,
           status: fd.get('status'),
           isGeneralAdmin: isAdminFlag,
           memberships: finalMemberships,
+          familyMembers,
         });
 
         closeModal();
-        showToast(existing ? 'Cadastro e vínculos atualizados!' : 'Novo membro cadastrado com sucesso!');
+        showToast(existing ? 'Cadastro e integrantes atualizados!' : 'Novo cadastro salvo com sucesso!');
         onSaved();
       });
     },

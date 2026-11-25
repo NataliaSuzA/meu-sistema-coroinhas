@@ -1,8 +1,8 @@
 /**
- * Service Worker v4 — Gestão Pastoral - Paróquia Santa Teresa d'Ávila
+ * Service Worker v5 — Gestão Pastoral - Paróquia Santa Teresa d'Ávila
  */
 
-const CACHE_NAME = 'santa-teresa-pastoral-v4';
+const CACHE_NAME = 'santa-teresa-pastoral-v5';
 const CORE_ASSETS = [
   './',
   './index.html',

@@ -111,7 +111,14 @@ export async function renderLiturgy(container, { user }) {
     ? { label: 'Selecionada para leitura livre', cls: 'bg-[#F5EFE6] text-[#4E342E] border-[#D7C4B2]' }
     : isCustomByCelebrant
       ? { label: 'Escolhida no Roteiro do Celebrante', cls: 'bg-amber-100 text-[#92400E] border-amber-400' }
-      : { label: 'Padrão da Liturgia Diária', cls: 'bg-emerald-50 text-emerald-800 border-emerald-200' };
+      : liturgy.source === 'paulus'
+        ? { label: 'Fonte: Liturgia Diária Paulus', cls: 'bg-amber-100 text-[#78350F] border-amber-400' }
+        : { label: 'Padrão da Liturgia Diária', cls: 'bg-emerald-50 text-emerald-800 border-emerald-200' };
+
+  const sourceBadgeClass =
+    liturgy.source === 'paulus'
+      ? 'bg-amber-100 text-[#78350F] border-amber-400 font-extrabold'
+      : 'bg-[#FAF6F0] text-[#6D4C41] border-[#E6DACE] font-semibold';
 
   const colorStyle = getLiturgicalColorStyle(liturgy.liturgicalColor);
   const textClass = FONT_CLASSES[fontScale] || FONT_CLASSES[1];
@@ -155,12 +162,15 @@ export async function renderLiturgy(container, { user }) {
                 <span class="w-2 h-2 rounded-full" style="background-color:${colorStyle.dot};"></span>
                 Cor Litúrgica: ${escapeHtml(colorStyle.label)}
               </span>
-              <span class="text-[11px] font-semibold text-[#8D6E63] bg-[#FAF6F0] px-2.5 py-0.5 rounded-full border border-[#E6DACE]">
+              <span class="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-0.5 rounded-full border ${sourceBadgeClass}">
+                <i data-lucide="book-open" class="w-3 h-3"></i>
                 ${escapeHtml(liturgy.sourceLabel)}
               </span>
             </div>
             <h3 class="font-serif text-lg sm:text-xl font-bold text-[#3E2723]">${escapeHtml(liturgy.liturgiaTitle)}</h3>
-            <p class="text-xs text-[#6D4C41] capitalize mt-0.5">${escapeHtml(formatWeekdayBR(selectedDateISO))}, ${escapeHtml(formatDateBR(selectedDateISO))}</p>
+            <p class="text-xs text-[#6D4C41] capitalize mt-0.5">
+              ${escapeHtml(formatWeekdayBR(selectedDateISO))}, ${escapeHtml(formatDateBR(selectedDateISO))}${liturgy.liturgicalSeason && liturgy.liturgicalSeason !== liturgy.liturgiaTitle ? ` • ${escapeHtml(liturgy.liturgicalSeason)}` : ''}
+            </p>
           </div>
         </div>
       </section>

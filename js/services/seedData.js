@@ -1,7 +1,10 @@
 /**
- * Dados iniciais realistas (Mock Seed v4)
- * Inclui: Locais, Tipos de Celebração, Funções por Pastoral, Lembretes Internos Pendentes,
- * Escalas com Roteiro Especial do Celebrante e todas as regras de governança.
+ * Dados iniciais realistas (Mock Seed v5)
+ * Inclui:
+ * - Conta Familiar de exemplo com 2 irmãos (Pedro Lucas & João Miguel, aniversários em meses diferentes!)
+ * - Pedido de substituição em aberto na Pastoral Música (Gabriel Martins Rocha -> Mesa de Som)
+ *   com notificação no sino para os colegas da Música (Lucas Henrique Costa, João Pedro, Carlos)
+ * - Escala de hoje com Roteiro Especial do Padre
  */
 
 function formatISO(date) {
@@ -24,7 +27,7 @@ function makeBirthDate(year, monthIndex, day) {
 
 export const PERMISSION_DEFINITIONS = [
   { key: 'dashboard', label: 'Início (Dashboard)', group: 'Geral' },
-  { key: 'liturgy', label: 'Liturgia Diária & Roteiro do Celebrante', group: 'Liturgia' },
+  { key: 'liturgy', label: 'Liturgia Diária (Paulus) & Roteiro do Celebrante', group: 'Liturgia' },
   { key: 'agenda', label: 'Agenda', group: 'Geral' },
   { key: 'my_dates', label: 'Minhas Datas', group: 'Escalas' },
   { key: 'schedules_view', label: 'Escalas da Pastoral', group: 'Escalas' },
@@ -104,84 +107,19 @@ export function buildSeedData() {
   const dPlus10 = formatISO(addDays(today, 10));
 
   const pastorals = [
-    {
-      id: 'pas_coroinhas',
-      name: 'Pastoral dos Coroinhas e Acólitos',
-      shortName: 'Coroinhas e Acólitos',
-      color: '#B45309',
-      description: 'Serviço ao altar nas celebrações dominicais, semanais e solenidades.',
-      active: true,
-    },
-    {
-      id: 'pas_liturgia',
-      name: 'Pastoral da Liturgia',
-      shortName: 'Liturgia',
-      color: '#9A3412',
-      description: 'Proclamação da Palavra, salmos, preces e preparação litúrgica das missas.',
-      active: true,
-    },
-    {
-      id: 'pas_musica',
-      name: 'Pastoral da Música',
-      shortName: 'Música',
-      color: '#0F766E',
-      description: 'Animação litúrgica através dos cantos e ministério de música.',
-      active: true,
-    },
-    {
-      id: 'pas_ministros',
-      name: 'Ministros Extraordinários da Comunhão',
-      shortName: 'Ministros',
-      color: '#881337',
-      description: 'Auxílio na distribuição da Eucaristia nas missas e visita aos enfermos.',
-      active: true,
-    },
-    {
-      id: 'pas_acolhida',
-      name: 'Pastoral da Acolhida',
-      shortName: 'Acolhida',
-      color: '#5D4037',
-      description: 'Recepção fraterna dos fiéis nas portas da Matriz e capelas.',
-      active: true,
-    },
+    { id: 'pas_coroinhas', name: 'Pastoral dos Coroinhas e Acólitos', shortName: 'Coroinhas e Acólitos', color: '#B45309', description: 'Serviço ao altar nas celebrações dominicais, semanais e solenidades.', active: true },
+    { id: 'pas_liturgia', name: 'Pastoral da Liturgia', shortName: 'Liturgia', color: '#9A3412', description: 'Proclamação da Palavra, salmos, preces e preparação litúrgica das missas.', active: true },
+    { id: 'pas_musica', name: 'Pastoral da Música', shortName: 'Música', color: '#0F766E', description: 'Animação litúrgica através dos cantos e ministério de música.', active: true },
+    { id: 'pas_ministros', name: 'Ministros Extraordinários da Comunhão', shortName: 'Ministros', color: '#881337', description: 'Auxílio na distribuição da Eucaristia nas missas e visita aos enfermos.', active: true },
+    { id: 'pas_acolhida', name: 'Pastoral da Acolhida', shortName: 'Acolhida', color: '#5D4037', description: 'Recepção fraterna dos fiéis nas portas da Matriz e capelas.', active: true },
   ];
 
   const locations = [
-    {
-      id: 'loc_matriz',
-      name: "Igreja Matriz Santa Teresa d'Ávila",
-      type: 'Matriz',
-      address: 'Praça Santa Teresa, 100 — Centro',
-      active: true,
-    },
-    {
-      id: 'loc_sao_francisco',
-      name: 'Igreja São Francisco',
-      type: 'Capela',
-      address: 'Rua das Flores, 245 — Jardim São Francisco',
-      active: true,
-    },
-    {
-      id: 'loc_sao_jose',
-      name: 'Capela São José',
-      type: 'Capela',
-      address: 'Av. dos Trabalhadores, 890 — Vila Nova',
-      active: true,
-    },
-    {
-      id: 'loc_salao',
-      name: 'Salão Paroquial Santa Teresa',
-      type: 'Salão',
-      address: 'Anexo à Matriz — Entrada pela Rua Lateral',
-      active: true,
-    },
-    {
-      id: 'loc_externo',
-      name: 'Praça da Matriz (Área Externa)',
-      type: 'Externo',
-      address: 'Em frente à escadaria principal da Matriz',
-      active: false,
-    },
+    { id: 'loc_matriz', name: "Igreja Matriz Santa Teresa d'Ávila", type: 'Matriz', address: 'Praça Santa Teresa, 100 — Centro', active: true },
+    { id: 'loc_sao_francisco', name: 'Igreja São Francisco', type: 'Capela', address: 'Rua das Flores, 245 — Jardim São Francisco', active: true },
+    { id: 'loc_sao_jose', name: 'Capela São José', type: 'Capela', address: 'Av. dos Trabalhadores, 890 — Vila Nova', active: true },
+    { id: 'loc_salao', name: 'Salão Paroquial Santa Teresa', type: 'Salão', address: 'Anexo à Matriz — Entrada pela Rua Lateral', active: true },
+    { id: 'loc_externo', name: 'Praça da Matriz (Área Externa)', type: 'Externo', address: 'Em frente à escadaria principal da Matriz', active: false },
   ];
 
   const celebrationTypes = [
@@ -195,7 +133,6 @@ export function buildSeedData() {
   ];
 
   const roles = [
-    // Coroinhas e Acólitos
     { id: 'role_missal', pastoralId: 'pas_coroinhas', name: 'Missal', description: 'Sustenta o Missal Romano junto ao celebrante.', active: true },
     { id: 'role_credencia', pastoralId: 'pas_coroinhas', name: 'Credência', description: 'Prepara vasos sagrados, galhetas e lavabo.', active: true },
     { id: 'role_turiferario', pastoralId: 'pas_coroinhas', name: 'Turiferário', description: 'Conduz o turíbulo nas incensações solenes.', active: true },
@@ -206,28 +143,27 @@ export function buildSeedData() {
     { id: 'role_cerimonialista', pastoralId: 'pas_coroinhas', name: 'Cerimonialista', description: 'Coordena o rito e orienta os servidores.', active: true },
     { id: 'role_coord_missa', pastoralId: 'pas_coroinhas', name: 'Coordenador de Missa', description: 'Organiza a equipe na sacristia.', active: true },
 
-    // Liturgia
     { id: 'role_leitura1', pastoralId: 'pas_liturgia', name: '1ª Leitura', description: 'Proclamação da Primeira Leitura.', active: true },
     { id: 'role_leitura2', pastoralId: 'pas_liturgia', name: '2ª Leitura', description: 'Proclamação da Segunda Leitura.', active: true },
     { id: 'role_salmo', pastoralId: 'pas_liturgia', name: 'Salmista', description: 'Entoação ou proclamação do Salmo Responsorial.', active: true },
     { id: 'role_comentarista', pastoralId: 'pas_liturgia', name: 'Comentarista e Preces', description: 'Comentários iniciais e oração da assembleia.', active: true },
 
-    // Música
     { id: 'role_violao', pastoralId: 'pas_musica', name: 'Violão / Instrumento', description: 'Acompanhamento harmônico da celebração.', active: true },
     { id: 'role_teclado', pastoralId: 'pas_musica', name: 'Teclado', description: 'Base musical e prelúdios litúrgicos.', active: true },
     { id: 'role_voz', pastoralId: 'pas_musica', name: 'Voz Principal', description: 'Condução dos cantos litúrgicos.', active: true },
     { id: 'role_som', pastoralId: 'pas_musica', name: 'Mesa de Som', description: 'Operação e equalização de microfones.', active: true },
 
-    // Ministros
     { id: 'role_min_altar', pastoralId: 'pas_ministros', name: 'Ministro do Altar', description: 'Auxilia o sacerdote no presbitério.', active: true },
     { id: 'role_min_nave', pastoralId: 'pas_ministros', name: 'Ministro da Nave', description: 'Distribuição da Comunhão na nave da igreja.', active: true },
 
-    // Acolhida
     { id: 'role_porta_principal', pastoralId: 'pas_acolhida', name: 'Recepção Porta Principal', description: 'Acolhimento dos fiéis e entrega de folhetos.', active: true },
     { id: 'role_ofertorio', pastoralId: 'pas_acolhida', name: 'Coleta e Ofertório', description: 'Organização das ofertas e procissão das oferendas.', active: true },
   ];
 
   const defaultPass = 'pastoral2026';
+
+  const pedroBirth = makeBirthDate(2015, curMonth, Math.min(curDay + 2, 28)); // Mês atual!
+  const joaoMiguelBirth = makeBirthDate(2017, (curMonth + 4) % 12, 28); // Outro mês!
 
   const users = [
     {
@@ -240,6 +176,7 @@ export function buildSeedData() {
       isGeneralAdmin: true,
       status: 'Ativo',
       memberships: [],
+      familyMembers: [{ id: 'usr_admin', name: 'Pe. Marcos Antônio', birthDate: makeBirthDate(1980, (curMonth + 1) % 12, 15) }],
     },
     {
       id: 'usr_natalia',
@@ -255,6 +192,7 @@ export function buildSeedData() {
         { pastoralId: 'pas_liturgia', role: 'Coordenador' },
         { pastoralId: 'pas_ministros', role: 'Membro' },
       ],
+      familyMembers: [{ id: 'usr_natalia', name: 'Natália Faria Souza', birthDate: makeBirthDate(1998, curMonth, Math.min(curDay + 4, 28)) }],
     },
     {
       id: 'usr_carlos',
@@ -268,6 +206,56 @@ export function buildSeedData() {
       memberships: [
         { pastoralId: 'pas_musica', role: 'Coordenador' },
         { pastoralId: 'pas_acolhida', role: 'Coordenador' },
+      ],
+      familyMembers: [{ id: 'usr_carlos', name: 'Carlos Eduardo Lima', birthDate: makeBirthDate(1994, (curMonth + 2) % 12, 18) }],
+    },
+    {
+      id: 'usr_gabriel',
+      name: 'Gabriel Martins Rocha',
+      email: 'gabriel@santateresa.org.br',
+      password: defaultPass,
+      phone: '(11) 99180-3321',
+      birthDate: makeBirthDate(1999, (curMonth + 5) % 12, 12),
+      isGeneralAdmin: false,
+      status: 'Ativo',
+      memberships: [
+        { pastoralId: 'pas_musica', role: 'Membro' },
+        { pastoralId: 'pas_ministros', role: 'Membro' },
+      ],
+      familyMembers: [{ id: 'usr_gabriel', name: 'Gabriel Martins Rocha', birthDate: makeBirthDate(1999, (curMonth + 5) % 12, 12) }],
+    },
+    {
+      id: 'usr_lucas',
+      name: 'Lucas Henrique Costa',
+      email: 'lucas@santateresa.org.br',
+      password: defaultPass,
+      phone: '(11) 99420-1190',
+      birthDate: makeBirthDate(2004, curMonth, curDay > 5 ? curDay - 2 : curDay + 6),
+      isGeneralAdmin: false,
+      status: 'Ativo',
+      memberships: [
+        { pastoralId: 'pas_coroinhas', role: 'Membro' },
+        { pastoralId: 'pas_musica', role: 'Membro' },
+      ],
+      familyMembers: [{ id: 'usr_lucas', name: 'Lucas Henrique Costa', birthDate: makeBirthDate(2004, curMonth, curDay > 5 ? curDay - 2 : curDay + 6) }],
+    },
+    {
+      // CONTA FAMILIAR DE EXEMPLO (2 IRMÃOS NA MESMA CONTA!)
+      id: 'usr_familia_silva',
+      name: 'Família Silva (Pedro Lucas & João Miguel)',
+      email: 'familia.silva@santateresa.org.br',
+      password: defaultPass,
+      phone: '(11) 99511-6024',
+      birthDate: pedroBirth,
+      isGeneralAdmin: false,
+      status: 'Ativo',
+      memberships: [
+        { pastoralId: 'pas_coroinhas', role: 'Membro' },
+        { pastoralId: 'pas_acolhida', role: 'Membro' },
+      ],
+      familyMembers: [
+        { id: 'mem_pedro_lucas', name: 'Pedro Lucas Silva', birthDate: pedroBirth },
+        { id: 'mem_joao_miguel', name: 'João Miguel Silva', birthDate: joaoMiguelBirth },
       ],
     },
     {
@@ -284,6 +272,7 @@ export function buildSeedData() {
         { pastoralId: 'pas_musica', role: 'Membro' },
         { pastoralId: 'pas_liturgia', role: 'Membro' },
       ],
+      familyMembers: [{ id: 'usr_joao', name: 'João Pedro Almeida', birthDate: makeBirthDate(2005, curMonth, curDay) }],
     },
     {
       id: 'usr_rafael',
@@ -298,34 +287,7 @@ export function buildSeedData() {
         { pastoralId: 'pas_coroinhas', role: 'Coordenador' },
         { pastoralId: 'pas_ministros', role: 'Coordenador' },
       ],
-    },
-    {
-      id: 'usr_maria',
-      name: 'Maria Clara Santos',
-      email: 'maria@santateresa.org.br',
-      password: defaultPass,
-      phone: '(11) 99511-6024',
-      birthDate: makeBirthDate(2010, curMonth, Math.max(1, curDay > 12 ? 8 : 20)),
-      isGeneralAdmin: false,
-      status: 'Ativo',
-      memberships: [
-        { pastoralId: 'pas_coroinhas', role: 'Membro' },
-        { pastoralId: 'pas_acolhida', role: 'Membro' },
-      ],
-    },
-    {
-      id: 'usr_lucas',
-      name: 'Lucas Henrique Costa',
-      email: 'lucas@santateresa.org.br',
-      password: defaultPass,
-      phone: '(11) 99420-1190',
-      birthDate: makeBirthDate(2004, curMonth, curDay > 5 ? curDay - 2 : curDay + 6),
-      isGeneralAdmin: false,
-      status: 'Ativo',
-      memberships: [
-        { pastoralId: 'pas_coroinhas', role: 'Membro' },
-        { pastoralId: 'pas_musica', role: 'Membro' },
-      ],
+      familyMembers: [{ id: 'usr_rafael', name: 'Rafael Mendes Oliveira', birthDate: makeBirthDate(1995, (curMonth + 3) % 12, 10) }],
     },
     {
       id: 'usr_sofia',
@@ -333,27 +295,14 @@ export function buildSeedData() {
       email: 'sofia@santateresa.org.br',
       password: defaultPass,
       phone: '(11) 99310-5419',
-      birthDate: makeBirthDate(2001, (curMonth + 4) % 12, 22),
+      birthDate: makeBirthDate(2001, (curMonth + 6) % 12, 22),
       isGeneralAdmin: false,
       status: 'Ativo',
       memberships: [
         { pastoralId: 'pas_liturgia', role: 'Membro' },
         { pastoralId: 'pas_acolhida', role: 'Membro' },
       ],
-    },
-    {
-      id: 'usr_gabriel',
-      name: 'Gabriel Martins Rocha',
-      email: 'gabriel@santateresa.org.br',
-      password: defaultPass,
-      phone: '(11) 99180-3321',
-      birthDate: makeBirthDate(1999, (curMonth + 5) % 12, 12),
-      isGeneralAdmin: false,
-      status: 'Ativo',
-      memberships: [
-        { pastoralId: 'pas_ministros', role: 'Membro' },
-        { pastoralId: 'pas_musica', role: 'Membro' },
-      ],
+      familyMembers: [{ id: 'usr_sofia', name: 'Sofia Beatriz Ferreira', birthDate: makeBirthDate(2001, (curMonth + 6) % 12, 22) }],
     },
     {
       id: 'usr_thiago',
@@ -361,21 +310,11 @@ export function buildSeedData() {
       email: 'thiago@santateresa.org.br',
       password: defaultPass,
       phone: '(11) 98840-7712',
-      birthDate: makeBirthDate(2003, (curMonth + 6) % 12, 7),
+      birthDate: makeBirthDate(2003, (curMonth + 7) % 12, 7),
       isGeneralAdmin: false,
       status: 'Inativo',
       memberships: [{ pastoralId: 'pas_coroinhas', role: 'Membro' }],
-    },
-    {
-      id: 'usr_helena',
-      name: 'Helena Vitória Duarte',
-      email: 'helena@santateresa.org.br',
-      password: defaultPass,
-      phone: '(11) 98765-9001',
-      birthDate: makeBirthDate(2002, (curMonth + 7) % 12, 5),
-      isGeneralAdmin: false,
-      status: 'Bloqueado',
-      memberships: [{ pastoralId: 'pas_liturgia', role: 'Membro' }],
+      familyMembers: [{ id: 'usr_thiago', name: 'Thiago Ribeiro Lima', birthDate: makeBirthDate(2003, (curMonth + 7) % 12, 7) }],
     },
   ];
 
@@ -394,9 +333,9 @@ export function buildSeedData() {
       celebrantScript: '',
       notes: 'Chegar 30 minutos antes na sacristia.',
       assignments: [
-        { id: 'asg_p1', pastoralId: 'pas_coroinhas', roleId: 'role_missal', userId: 'usr_joao', substitutionRequested: false, substitutionReason: '' },
-        { id: 'asg_p2', pastoralId: 'pas_coroinhas', roleId: 'role_credencia', userId: 'usr_lucas', substitutionRequested: false, substitutionReason: '' },
-        { id: 'asg_p3', pastoralId: 'pas_coroinhas', roleId: 'role_cruz', userId: 'usr_maria', substitutionRequested: false, substitutionReason: '' },
+        { id: 'asg_p1', pastoralId: 'pas_coroinhas', roleId: 'role_missal', userId: 'usr_joao', memberId: 'usr_joao', substitutionRequested: false, substitutionReason: '', substitutionAccepted: false, substitutedFromName: '' },
+        { id: 'asg_p2', pastoralId: 'pas_coroinhas', roleId: 'role_credencia', userId: 'usr_lucas', memberId: 'usr_lucas', substitutionRequested: false, substitutionReason: '', substitutionAccepted: false, substitutedFromName: '' },
+        { id: 'asg_p3', pastoralId: 'pas_coroinhas', roleId: 'role_cruz', userId: 'usr_familia_silva', memberId: 'mem_pedro_lucas', substitutionRequested: false, substitutionReason: '', substitutionAccepted: false, substitutedFromName: '' },
       ],
     },
     {
@@ -411,12 +350,13 @@ export function buildSeedData() {
       eucharisticPrayerId: 'oe_3',
       eucharisticPrayerSource: 'custom',
       celebrantScript:
-        '1. Entrada solene pelo corredor central com turíbulo e cruz processional.\n2. Após a homilia, haverá bênção especial dos novos coroinhas e renovação dos compromissos.\n3. Utilizar Oração Eucarística III com incensação do altar e das oferendas.\n4. Ao final, procissão breve até o altar lateral de Santa Teresa d’Ávila.',
-      notes: 'Roteiro Especial do Pe. Marcos — chegar às 18:50 para preparação do turíbulo.',
+        '1. Entrada solene pelo corredor central com turíbulo e cruz processional.\n2. Após a homilia, bênção especial dos coroinhas.\n3. Utilizar Oração Eucarística III conforme orientação do Pároco.',
+      notes: 'Roteiro Especial do Pe. Marcos — chegar às 18:50.',
       assignments: [
-        { id: 'asg_t1', pastoralId: 'pas_coroinhas', roleId: 'role_coord_missa', userId: 'usr_natalia', substitutionRequested: false, substitutionReason: '' },
-        { id: 'asg_t2', pastoralId: 'pas_coroinhas', roleId: 'role_turiferario', userId: 'usr_joao', substitutionRequested: false, substitutionReason: '' },
-        { id: 'asg_t3', pastoralId: 'pas_coroinhas', roleId: 'role_cruz', userId: 'usr_maria', substitutionRequested: false, substitutionReason: '' },
+        { id: 'asg_t1', pastoralId: 'pas_coroinhas', roleId: 'role_coord_missa', userId: 'usr_natalia', memberId: 'usr_natalia', substitutionRequested: false, substitutionReason: '', substitutionAccepted: false, substitutedFromName: '' },
+        { id: 'asg_t2', pastoralId: 'pas_coroinhas', roleId: 'role_turiferario', userId: 'usr_joao', memberId: 'usr_joao', substitutionRequested: false, substitutionReason: '', substitutionAccepted: false, substitutedFromName: '' },
+        { id: 'asg_t3', pastoralId: 'pas_coroinhas', roleId: 'role_cruz', userId: 'usr_familia_silva', memberId: 'mem_pedro_lucas', substitutionRequested: false, substitutionReason: '', substitutionAccepted: false, substitutedFromName: '' },
+        { id: 'asg_t4', pastoralId: 'pas_coroinhas', roleId: 'role_ceroferario', userId: 'usr_familia_silva', memberId: 'mem_joao_miguel', substitutionRequested: false, substitutionReason: '', substitutionAccepted: false, substitutedFromName: '' },
       ],
     },
     {
@@ -433,9 +373,9 @@ export function buildSeedData() {
       celebrantScript: '',
       notes: 'Chegar às 18:30 para organização do altar.',
       assignments: [
-        { id: 'asg_1', pastoralId: 'pas_coroinhas', roleId: 'role_missal', userId: 'usr_joao', substitutionRequested: false, substitutionReason: '' },
-        { id: 'asg_2', pastoralId: 'pas_coroinhas', roleId: 'role_credencia', userId: 'usr_lucas', substitutionRequested: true, substitutionReason: 'Compromisso acadêmico no horário.' },
-        { id: 'asg_3', pastoralId: 'pas_coroinhas', roleId: 'role_coord_missa', userId: 'usr_natalia', substitutionRequested: false, substitutionReason: '' },
+        { id: 'asg_1', pastoralId: 'pas_coroinhas', roleId: 'role_missal', userId: 'usr_joao', memberId: 'usr_joao', substitutionRequested: false, substitutionReason: '', substitutionAccepted: false, substitutedFromName: '' },
+        { id: 'asg_2', pastoralId: 'pas_coroinhas', roleId: 'role_credencia', userId: 'usr_lucas', memberId: 'usr_lucas', substitutionRequested: true, substitutionReason: 'Compromisso acadêmico no horário.', substitutionAccepted: false, substitutedFromName: '' },
+        { id: 'asg_3', pastoralId: 'pas_coroinhas', roleId: 'role_coord_missa', userId: 'usr_natalia', memberId: 'usr_natalia', substitutionRequested: false, substitutionReason: '', substitutionAccepted: false, substitutedFromName: '' },
       ],
     },
     {
@@ -450,11 +390,12 @@ export function buildSeedData() {
       eucharisticPrayerId: 'oe_2',
       eucharisticPrayerSource: 'default',
       celebrantScript: '',
-      notes: 'Repertório do Tempo Comum — conferir cifra no Bloco de Notas.',
+      notes: 'Repertório do Tempo Comum — passagem de som às 18:30.',
       assignments: [
-        { id: 'asg_4', pastoralId: 'pas_musica', roleId: 'role_violao', userId: 'usr_joao', substitutionRequested: false, substitutionReason: '' },
-        { id: 'asg_5', pastoralId: 'pas_musica', roleId: 'role_voz', userId: 'usr_carlos', substitutionRequested: false, substitutionReason: '' },
-        { id: 'asg_6', pastoralId: 'pas_musica', roleId: 'role_som', userId: 'usr_gabriel', substitutionRequested: true, substitutionReason: 'Atraso no trabalho, preciso de cobertura no som.' },
+        { id: 'asg_4', pastoralId: 'pas_musica', roleId: 'role_violao', userId: 'usr_joao', memberId: 'usr_joao', substitutionRequested: false, substitutionReason: '', substitutionAccepted: false, substitutedFromName: '' },
+        { id: 'asg_5', pastoralId: 'pas_musica', roleId: 'role_voz', userId: 'usr_carlos', memberId: 'usr_carlos', substitutionRequested: false, substitutionReason: '', substitutionAccepted: false, substitutedFromName: '' },
+        // PEDIDO DE SUBSTITUIÇÃO EM ABERTO NA PASTORAL MÚSICA (Gabriel -> Mesa de Som)
+        { id: 'asg_6', pastoralId: 'pas_musica', roleId: 'role_som', userId: 'usr_gabriel', memberId: 'usr_gabriel', substitutionRequested: true, substitutionReason: 'Atraso no trabalho, preciso de cobertura na Mesa de Som.', substitutionAccepted: false, substitutedFromName: '' },
       ],
     },
     {
@@ -468,13 +409,12 @@ export function buildSeedData() {
       pastoralId: 'pas_liturgia',
       eucharisticPrayerId: 'oe_cri_1',
       eucharisticPrayerSource: 'custom',
-      celebrantScript:
-        'Missa dominical com participação especial da Catequese. Utilizar Oração Eucarística para Missas com Crianças I e dar breve explicação antes do Evangelho.',
+      celebrantScript: 'Missa dominical com participação especial da Catequese. Utilizar Oração Eucarística para Missas com Crianças I.',
       notes: 'Confirmar leituras do domingo no lecionário.',
       assignments: [
-        { id: 'asg_7', pastoralId: 'pas_liturgia', roleId: 'role_leitura1', userId: 'usr_sofia', substitutionRequested: false, substitutionReason: '' },
-        { id: 'asg_8', pastoralId: 'pas_liturgia', roleId: 'role_salmo', userId: 'usr_joao', substitutionRequested: false, substitutionReason: '' },
-        { id: 'asg_9', pastoralId: 'pas_liturgia', roleId: 'role_comentarista', userId: 'usr_natalia', substitutionRequested: false, substitutionReason: '' },
+        { id: 'asg_7', pastoralId: 'pas_liturgia', roleId: 'role_leitura1', userId: 'usr_sofia', memberId: 'usr_sofia', substitutionRequested: false, substitutionReason: '', substitutionAccepted: false, substitutedFromName: '' },
+        { id: 'asg_8', pastoralId: 'pas_liturgia', roleId: 'role_salmo', userId: 'usr_joao', memberId: 'usr_joao', substitutionRequested: false, substitutionReason: '', substitutionAccepted: false, substitutedFromName: '' },
+        { id: 'asg_9', pastoralId: 'pas_liturgia', roleId: 'role_comentarista', userId: 'usr_natalia', memberId: 'usr_natalia', substitutionRequested: false, substitutionReason: '', substitutionAccepted: false, substitutedFromName: '' },
       ],
     },
     {
@@ -491,8 +431,8 @@ export function buildSeedData() {
       celebrantScript: 'Recepção solene com entrega de folhetos comemorativos nas portas principal e lateral.',
       notes: 'Recepção festiva nas duas entradas da Matriz.',
       assignments: [
-        { id: 'asg_10', pastoralId: 'pas_acolhida', roleId: 'role_porta_principal', userId: 'usr_carlos', substitutionRequested: false, substitutionReason: '' },
-        { id: 'asg_11', pastoralId: 'pas_acolhida', roleId: 'role_ofertorio', userId: 'usr_maria', substitutionRequested: false, substitutionReason: '' },
+        { id: 'asg_10', pastoralId: 'pas_acolhida', roleId: 'role_porta_principal', userId: 'usr_carlos', memberId: 'usr_carlos', substitutionRequested: false, substitutionReason: '', substitutionAccepted: false, substitutedFromName: '' },
+        { id: 'asg_11', pastoralId: 'pas_acolhida', roleId: 'role_ofertorio', userId: 'usr_familia_silva', memberId: 'mem_joao_miguel', substitutionRequested: false, substitutionReason: '', substitutionAccepted: false, substitutedFromName: '' },
       ],
     },
     {
@@ -509,119 +449,23 @@ export function buildSeedData() {
       celebrantScript: '',
       notes: 'Oração breve na capela do Santíssimo às 18:40.',
       assignments: [
-        { id: 'asg_12', pastoralId: 'pas_ministros', roleId: 'role_min_altar', userId: 'usr_rafael', substitutionRequested: false, substitutionReason: '' },
-        { id: 'asg_13', pastoralId: 'pas_ministros', roleId: 'role_min_nave', userId: 'usr_natalia', substitutionRequested: false, substitutionReason: '' },
-        { id: 'asg_14', pastoralId: 'pas_ministros', roleId: 'role_min_nave', userId: 'usr_gabriel', substitutionRequested: false, substitutionReason: '' },
-      ],
-    },
-    {
-      id: 'sch_6',
-      date: dPlus9,
-      time: '10:00',
-      locationId: 'loc_sao_jose',
-      location: 'Capela São José',
-      celebrationTypeId: 'ct_batizado',
-      celebrationType: 'Batizado',
-      pastoralId: 'pas_coroinhas',
-      eucharisticPrayerId: 'oe_2',
-      eucharisticPrayerSource: 'default',
-      celebrantScript: 'Preparar pia batismal, óleo dos catecúmenos, crisma e círio pascal aceso.',
-      notes: 'Celebração comunitária de Batizados.',
-      assignments: [
-        { id: 'asg_15', pastoralId: 'pas_coroinhas', roleId: 'role_turiferario', userId: 'usr_joao', substitutionRequested: false, substitutionReason: '' },
-        { id: 'asg_16', pastoralId: 'pas_coroinhas', roleId: 'role_cruz', userId: 'usr_maria', substitutionRequested: false, substitutionReason: '' },
+        { id: 'asg_12', pastoralId: 'pas_ministros', roleId: 'role_min_altar', userId: 'usr_rafael', memberId: 'usr_rafael', substitutionRequested: false, substitutionReason: '', substitutionAccepted: false, substitutedFromName: '' },
+        { id: 'asg_13', pastoralId: 'pas_ministros', roleId: 'role_min_nave', userId: 'usr_natalia', memberId: 'usr_natalia', substitutionRequested: false, substitutionReason: '', substitutionAccepted: false, substitutedFromName: '' },
+        { id: 'asg_14', pastoralId: 'pas_ministros', roleId: 'role_min_nave', userId: 'usr_gabriel', memberId: 'usr_gabriel', substitutionRequested: false, substitutionReason: '', substitutionAccepted: false, substitutedFromName: '' },
       ],
     },
   ];
 
   const events = [
-    {
-      id: 'evt_1',
-      title: 'Ensaio Litúrgico — Coroinhas e Liturgia',
-      type: 'Ensaio',
-      celebrationTypeId: 'ct_solene',
-      celebrationType: 'Missa Solene / Padroeira',
-      date: dPlus1,
-      time: '17:30',
-      locationId: 'loc_matriz',
-      location: "Igreja Matriz Santa Teresa d'Ávila",
-      description: 'Ensaio prático de procissão de entrada e proclamação das leituras.',
-      pastoralId: 'pas_coroinhas',
-    },
-    {
-      id: 'evt_2',
-      title: 'Ensaio do Ministério de Música',
-      type: 'Ensaio',
-      celebrationTypeId: 'ct_dominical',
-      celebrationType: 'Missa Dominical',
-      date: dPlus3,
-      time: '17:00',
-      locationId: 'loc_salao',
-      location: 'Salão Paroquial Santa Teresa',
-      description: 'Passagem do repertório da Solenidade e afinação dos instrumentos.',
-      pastoralId: 'pas_musica',
-    },
-    {
-      id: 'evt_3',
-      title: 'Adoração Comunitária com as Pastorais',
-      type: 'Celebração',
-      celebrationTypeId: 'ct_adoracao',
-      celebrationType: 'Adoração ao Santíssimo',
-      date: dPlus6,
-      time: '20:15',
-      locationId: 'loc_matriz',
-      location: "Igreja Matriz Santa Teresa d'Ávila",
-      description: 'Momento de oração e adoração com todas as pastorais da paróquia.',
-      pastoralId: 'all',
-    },
+    { id: 'evt_1', title: 'Ensaio Litúrgico — Coroinhas e Liturgia', type: 'Ensaio', celebrationTypeId: 'ct_solene', celebrationType: 'Missa Solene / Padroeira', date: dPlus1, time: '17:30', locationId: 'loc_matriz', location: "Igreja Matriz Santa Teresa d'Ávila", description: 'Ensaio prático de procissão de entrada e proclamação das leituras.', pastoralId: 'pas_coroinhas' },
+    { id: 'evt_2', title: 'Ensaio do Ministério de Música', type: 'Ensaio', celebrationTypeId: 'ct_dominical', celebrationType: 'Missa Dominical', date: dPlus3, time: '17:00', locationId: 'loc_salao', location: 'Salão Paroquial Santa Teresa', description: 'Passagem do repertório da Solenidade.', pastoralId: 'pas_musica' },
+    { id: 'evt_3', title: 'Adoração Comunitária com as Pastorais', type: 'Celebração', celebrationTypeId: 'ct_adoracao', celebrationType: 'Adoração ao Santíssimo', date: dPlus6, time: '20:15', locationId: 'loc_matriz', location: "Igreja Matriz Santa Teresa d'Ávila", description: 'Momento de oração com todas as pastorais.', pastoralId: 'all' },
   ];
 
   const notes = [
-    {
-      id: 'note_1',
-      title: 'Orientações Gerais da Paróquia Santa Teresa',
-      content: 'Todas as equipes devem chegar com no mínimo 25 minutos de antecedência para um momento breve de oração antes da Santa Missa.',
-      authorId: 'usr_admin',
-      pastoralIds: ['all'],
-      coordinatorsOnly: false,
-      createdAt: `${dMinus4}T14:20:00`,
-    },
-    {
-      id: 'note_2',
-      title: 'Checklist da Sacristia (Coroinhas e Liturgia)',
-      content: 'Conferir galhetas, cálice, corporal, Lecionário marcado nas leituras do domingo e velas do altar acesas 15 minutos antes.',
-      authorId: 'usr_natalia',
-      pastoralIds: ['pas_coroinhas', 'pas_liturgia'],
-      coordinatorsOnly: false,
-      createdAt: `${dMinus2}T16:10:00`,
-    },
-    {
-      id: 'note_3',
-      title: 'Repertório e Cifras da Semana (Música)',
-      content: 'Entrada: Eis-me aqui Senhor (Tom G) • Ofertório: Sabes Senhor (Tom D) • Comunhão: Pão da Vida (Tom C).',
-      authorId: 'usr_carlos',
-      pastoralIds: ['pas_musica'],
-      coordinatorsOnly: false,
-      createdAt: `${dMinus2}T18:45:00`,
-    },
-    {
-      id: 'note_4',
-      title: 'Protocolo de Acolhimento — Portas da Matriz',
-      content: 'Distribuir folhetos nas duas entradas 20 minutos antes e orientar idosos aos bancos reservados.',
-      authorId: 'usr_carlos',
-      pastoralIds: ['pas_acolhida'],
-      coordinatorsOnly: false,
-      createdAt: `${dMinus1}T10:30:00`,
-    },
-    {
-      id: 'note_5',
-      title: 'Pauta Interna — Coordenação Coroinhas',
-      content: 'Revisar estoque de túnicas novas e confirmar escala do tríduo com Rafael.',
-      authorId: 'usr_natalia',
-      pastoralIds: ['pas_coroinhas'],
-      coordinatorsOnly: true,
-      createdAt: `${dMinus2}T20:00:00`,
-    },
+    { id: 'note_1', title: 'Orientações Gerais da Paróquia Santa Teresa', content: 'Todas as equipes devem chegar com no mínimo 25 minutos de antecedência para oração antes da Missa.', authorId: 'usr_admin', pastoralIds: ['all'], coordinatorsOnly: false, createdAt: `${dMinus4}T14:20:00` },
+    { id: 'note_2', title: 'Checklist da Sacristia (Coroinhas e Liturgia)', content: 'Conferir galhetas, cálice, corporal, Lecionário marcado e velas do altar acesas 15 minutos antes.', authorId: 'usr_natalia', pastoralIds: ['pas_coroinhas', 'pas_liturgia'], coordinatorsOnly: false, createdAt: `${dMinus2}T16:10:00` },
+    { id: 'note_3', title: 'Repertório e Cifras da Semana (Música)', content: 'Entrada: Eis-me aqui Senhor (Tom G) • Ofertório: Sabes Senhor (Tom D) • Comunhão: Pão da Vida (Tom C).', authorId: 'usr_carlos', pastoralIds: ['pas_musica'], coordinatorsOnly: false, createdAt: `${dMinus2}T18:45:00` },
   ];
 
   const forms = [
@@ -665,18 +509,6 @@ export function buildSeedData() {
         { id: 'q_7', text: 'Sugestão de tema para nossa formação paroquial:', type: 'text', required: false, options: [] },
       ],
     },
-    {
-      id: 'form_4',
-      title: 'Inscrição — Retiro Litúrgico (Prazo Encerrado)',
-      description: 'Formulário demonstrativo com data/hora de encerramento já expirada automaticamente.',
-      pastoralIds: ['pas_coroinhas'],
-      deadline: `${dMinus1}T18:00`,
-      active: true,
-      createdAt: dMinus4,
-      questions: [
-        { id: 'q_8', text: 'Você participou do retiro anterior?', type: 'boolean', required: true, options: [] },
-      ],
-    },
   ];
 
   const responses = [
@@ -684,79 +516,80 @@ export function buildSeedData() {
       id: 'resp_1',
       formId: 'form_1',
       userId: 'usr_joao',
+      respondentMemberId: 'usr_joao',
+      respondentLabel: 'João Pedro Almeida',
       submittedAt: `${dMinus2}T10:15:00`,
       validated: false,
       validatedBy: null,
       validatedAt: null,
-      answers: {
-        q_1: 'Domingo 19:00 (Matriz)',
-        q_2: 'Sim',
-        q_3: 'Sem restrições para este mês.',
-      },
+      answers: { q_1: 'Domingo 19:00 (Matriz)', q_2: 'Sim', q_3: 'Sem restrições para este mês.' },
     },
     {
       id: 'resp_2',
       formId: 'form_1',
-      userId: 'usr_maria',
+      userId: 'usr_familia_silva',
+      respondentMemberId: 'all_family',
+      respondentLabel: 'Ambos os irmãos (Pedro Lucas & João Miguel)',
       submittedAt: `${dMinus2}T14:40:00`,
       validated: true,
       validatedBy: 'usr_natalia',
       validatedAt: `${dMinus1}T09:10:00`,
-      answers: {
-        q_1: 'Domingo 09:30 (Matriz)',
-        q_2: 'Sim',
-        q_3: 'Disponível aos domingos pela manhã.',
-      },
-    },
-    {
-      id: 'resp_3',
-      formId: 'form_2',
-      userId: 'usr_joao',
-      submittedAt: `${dMinus2}T19:05:00`,
-      validated: true,
-      validatedBy: 'usr_carlos',
-      validatedAt: `${dMinus1}T11:20:00`,
-      answers: {
-        q_4: 'Violão',
-        q_5: 'Sim',
-      },
+      answers: { q_1: 'Domingo 09:30 (Matriz)', q_2: 'Sim', q_3: 'Pedro e João podem servir juntos aos domingos.' },
     },
   ];
 
   const notices = [
-    {
-      id: 'not_1',
-      title: 'Encontro Paroquial das Pastorais com o Pároco',
-      content: 'Queridos coordenadores e membros, convocamos todas as pastorais para o nosso encontro mensal no Salão Paroquial Santa Teresa. Sua presença fortalece a unidade da nossa comunidade!',
-      authorId: 'usr_admin',
-      pastoralIds: ['all'],
-      pinned: true,
-      createdAt: `${dMinus2}T09:00:00`,
-    },
-    {
-      id: 'not_2',
-      title: 'Ensaio Conjunto — Coroinhas e Liturgia',
-      content: 'Lembramos aos membros de Coroinhas e Liturgia que o ensaio prático será na Matriz Santa Teresa às 17:30. Tragam o caderno litúrgico.',
-      authorId: 'usr_natalia',
-      pastoralIds: ['pas_coroinhas', 'pas_liturgia'],
-      pinned: false,
-      createdAt: `${dMinus4}T18:30:00`,
-    },
-    {
-      id: 'not_3',
-      title: 'Passagem de Som e Recepção — Música e Acolhida',
-      content: 'Equipes de Música e Acolhida: neste domingo chegaremos 40 minutos antes da Solenidade para passagem de som e alinhamento das portas da Matriz.',
-      authorId: 'usr_carlos',
-      pastoralIds: ['pas_musica', 'pas_acolhida'],
-      pinned: false,
-      createdAt: `${dMinus1}T11:15:00`,
-    },
+    { id: 'not_1', title: 'Encontro Paroquial das Pastorais com o Pároco', content: 'Queridos coordenadores e membros, convocamos todas as pastorais para o nosso encontro mensal no Salão Paroquial Santa Teresa.', authorId: 'usr_admin', pastoralIds: ['all'], pinned: true, createdAt: `${dMinus2}T09:00:00` },
+    { id: 'not_2', title: 'Ensaio Conjunto — Coroinhas e Liturgia', content: 'Ensaio prático na Matriz Santa Teresa às 17:30.', authorId: 'usr_natalia', pastoralIds: ['pas_coroinhas', 'pas_liturgia'], pinned: false, createdAt: `${dMinus4}T18:30:00` },
+    { id: 'not_3', title: 'Passagem de Som — Pastoral da Música', content: 'Cheguem 30 minutos antes na Igreja São Francisco.', authorId: 'usr_carlos', pastoralIds: ['pas_musica'], pinned: false, createdAt: `${dMinus1}T11:15:00` },
   ];
 
-  // Notificações internas iniciais (lembretes pendentes para demonstrar o Sino e o Banner no Início!)
+  // Notificações iniciais: inclui pedido de substituição em aberto na Música para Lucas, João e Carlos!
   const notifications = [
     {
-      id: 'notif_1',
+      id: 'notif_sub_1',
+      type: 'substitution_open',
+      recipientUserId: 'usr_lucas',
+      senderUserId: 'usr_gabriel',
+      scheduleId: 'sch_2',
+      assignmentId: 'asg_6',
+      pastoralId: 'pas_musica',
+      title: 'Pedido de Substituição em Aberto (Música)',
+      message: `Gabriel Martins Rocha solicitou substituição em Mesa de Som na missa de ${dPlus1.split('-').reverse().join('/')} às 19:00 (Igreja São Francisco).`,
+      createdAt: `${dToday}T11:00:00`,
+      read: false,
+      completed: false,
+    },
+    {
+      id: 'notif_sub_2',
+      type: 'substitution_open',
+      recipientUserId: 'usr_joao',
+      senderUserId: 'usr_gabriel',
+      scheduleId: 'sch_2',
+      assignmentId: 'asg_6',
+      pastoralId: 'pas_musica',
+      title: 'Pedido de Substituição em Aberto (Música)',
+      message: `Gabriel Martins Rocha solicitou substituição em Mesa de Som na missa de ${dPlus1.split('-').reverse().join('/')} às 19:00 (Igreja São Francisco).`,
+      createdAt: `${dToday}T11:00:00`,
+      read: false,
+      completed: false,
+    },
+    {
+      id: 'notif_sub_3',
+      type: 'substitution_open',
+      recipientUserId: 'usr_carlos',
+      senderUserId: 'usr_gabriel',
+      scheduleId: 'sch_2',
+      assignmentId: 'asg_6',
+      pastoralId: 'pas_musica',
+      title: 'Pedido de Substituição em Aberto (Música)',
+      message: `Gabriel Martins Rocha solicitou substituição em Mesa de Som na missa de ${dPlus1.split('-').reverse().join('/')} às 19:00 (Igreja São Francisco).`,
+      createdAt: `${dToday}T11:00:00`,
+      read: false,
+      completed: false,
+    },
+    {
+      id: 'notif_form_1',
       type: 'form_reminder',
       recipientUserId: 'usr_joao',
       senderUserId: 'usr_admin',
@@ -767,30 +600,14 @@ export function buildSeedData() {
       read: false,
       completed: false,
     },
-    {
-      id: 'notif_2',
-      type: 'form_reminder',
-      recipientUserId: 'usr_lucas',
-      senderUserId: 'usr_natalia',
-      formId: 'form_1',
-      title: 'Lembrete de Formulário Pendente',
-      message: "A Coordenação enviou um lembrete: responda ao formulário 'Disponibilidade para Escalas — Coroinhas e Liturgia' antes do prazo.",
-      createdAt: `${dToday}T09:15:00`,
-      read: false,
-      completed: false,
-    },
   ];
 
+  // Presença indexada por memberId individual!
   const attendance = {
     sch_past_1: {
       usr_joao: 'Presente',
       usr_lucas: 'Presente',
-      usr_maria: 'Falta Justificada',
-    },
-    evt_1: {
-      usr_joao: 'Presente',
-      usr_maria: 'Presente',
-      usr_lucas: 'Falta',
+      mem_pedro_lucas: 'Presente',
     },
   };
 
@@ -800,24 +617,16 @@ export function buildSeedData() {
       recipientUserId: 'usr_joao',
       authorId: 'usr_natalia',
       authorPastoralLabel: 'Coroinhas e Acólitos',
-      message: "Feliz aniversário, João! Que Deus e Santa Teresa d'Ávila abençoem muito sua vida, seus estudos e sua linda missão no altar!",
+      message: "Feliz aniversário, João! Que Deus e Santa Teresa d'Ávila abençoem muito sua vida e missão!",
       createdAt: `${dToday}T08:15:00`,
     },
     {
       id: 'bmsg_2',
-      recipientUserId: 'usr_joao',
-      authorId: 'usr_carlos',
-      authorPastoralLabel: 'Música',
-      message: 'Parabéns, João! Obrigado pela dedicação no violão e em todas as celebrações. Muita saúde e paz!',
-      createdAt: `${dToday}T09:40:00`,
-    },
-    {
-      id: 'bmsg_3',
-      recipientUserId: 'usr_natalia',
-      authorId: 'usr_rafael',
+      recipientUserId: 'mem_pedro_lucas',
+      authorId: 'usr_natalia',
       authorPastoralLabel: 'Coroinhas e Acólitos',
-      message: 'Já deixando os parabéns adiantados pelo mês do seu aniversário, Natália! Obrigado por todo carinho na coordenação!',
-      createdAt: `${dMinus1}T16:20:00`,
+      message: 'Parabéns adiantado, Pedro Lucas! Que alegria ter você e seu irmão servindo juntos ao altar!',
+      createdAt: `${dToday}T09:10:00`,
     },
   ];
 

@@ -1,9 +1,9 @@
 /**
- * Camada de persistência abstrata baseada em localStorage (v4).
- * Estruturada por coleções para futura migração direta ao Firebase Auth / Firestore.
+ * Camada de persistência abstrata baseada em localStorage (v5).
+ * Suporte a Contas Familiares (irmãos), Aceite de Substituições e Liturgia Paulus.
  */
 
-const NAMESPACE = 'psta_gestao_v4';
+const NAMESPACE = 'psta_gestao_v5';
 
 export const COLLECTIONS = {
   PASTORALS: 'pastorals',

@@ -1,10 +1,7 @@
 /**
- * Módulo 8: Respostas & Adesão de Formulários + Lembrete Interno no Sistema
- * - Aba "Responderam": lista envios, validação e exportação CSV/Excel
- * - Aba "Pendentes (Não Responderam)":
- *   * Botão "Enviar Lembrete" individual dispara notificação interna In-App
- *   * Botão no topo "Enviar Lembrete para Todos os Pendentes"
- *   * Status atualizado para "Lembrete enviado (data/hora)" com opção de reenviar
+ * Módulo 8: Respostas & Adesão de Formulários + Lembrete Interno + Contas Familiares
+ * - Exibe claramente a identificação do integrante/irmão respondente (ex: "Ambos os irmãos" ou nome individual)
+ * - Inclui "Integrante / Respondente" na exportação CSV/Excel
  */
 
 import { dataService } from '../services/dataService.js';
@@ -15,9 +12,11 @@ import {
   formatDateTimeBR,
   getFormTargetUsers,
   getUserMemberships,
+  isFamilyAccount,
   isFormClosed,
   isGeneralAdmin,
   refreshIcons,
+  renderFamilyAccountBadge,
   renderPastoralPill,
   renderPastoralPillsList,
   showToast,
@@ -58,7 +57,7 @@ export function renderResponses(container, { user, onNotificationsChanged }) {
         <div>
           <h3 class="text-xl font-extrabold text-[#3E2723]">Respostas &amp; Adesão de Formulários</h3>
           <p class="text-sm text-[#6D4C41] mt-0.5">
-            Valide envios, dispare lembretes internos no sistema para pendentes e exporte CSV/Excel.
+            Valide envios, visualize integrantes de contas familiares, dispare lembretes internos e exporte CSV/Excel.
           </p>
         </div>
 
@@ -110,7 +109,7 @@ export function renderResponses(container, { user, onNotificationsChanged }) {
           <div class="p-4 rounded-2xl bg-[#FAF6F0] border border-[#E6DACE] space-y-2.5">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <p class="text-sm font-extrabold text-[#3E2723]">
-                ${answeredOfTargets} de ${totalTargets} membros responderam — <span class="text-[#B45309]">${adherencePct}%</span>
+                ${answeredOfTargets} de ${totalTargets} contas responderam — <span class="text-[#B45309]">${adherencePct}%</span>
               </p>
               <div class="flex items-center gap-3 text-xs font-semibold">
                 <span class="text-emerald-800">${validatedCount} validadas</span>
@@ -199,7 +198,6 @@ export function renderResponses(container, { user, onNotificationsChanged }) {
     });
   });
 
-  // Lembrete interno individual
   container.querySelectorAll('[data-send-reminder]').forEach((btn) => {
     btn.addEventListener('click', () => {
       if (!activeForm) return;
@@ -216,7 +214,6 @@ export function renderResponses(container, { user, onNotificationsChanged }) {
     });
   });
 
-  // Lembrete interno para todos os pendentes
   container.querySelector('#btn-remind-all')?.addEventListener('click', () => {
     if (!activeForm || pendingMembers.length === 0) return;
     pendingMembers.forEach((m) => {
@@ -257,7 +254,8 @@ export function renderResponses(container, { user, onNotificationsChanged }) {
       return;
     }
     const headers = [
-      'Membro',
+      'Conta / Membro',
+      'Integrante / Respondente',
       'Pastorais',
       'E-mail',
       'Status Validação',
@@ -271,6 +269,7 @@ export function renderResponses(container, { user, onNotificationsChanged }) {
         .join(', ');
       return [
         m?.name || 'Membro removido',
+        resp.respondentLabel || m?.name || '—',
         m?.isGeneralAdmin ? 'Coordenação Geral' : pNames || '—',
         m?.email || '—',
         resp.validated ? 'Validada pela Coordenação' : 'Aguardando Validação',
@@ -308,7 +307,7 @@ function renderAnsweredTab(activeForm, formResponses, userMap, pastoralMap) {
         <table class="w-full text-left border-collapse">
           <thead>
             <tr class="bg-[#FDFBF7] border-b border-[#E6DACE] text-[11px] font-bold uppercase tracking-wider text-[#6D4C41]">
-              <th class="px-5 py-3.5 whitespace-nowrap">Membro</th>
+              <th class="px-5 py-3.5 whitespace-nowrap">Membro / Integrante</th>
               <th class="px-4 py-3.5 whitespace-nowrap">Status &amp; Envio</th>
               ${activeForm.questions.map((q) => `<th class="px-4 py-3.5 min-w-[190px]">${escapeHtml(q.text)}</th>`).join('')}
               <th class="px-5 py-3.5 text-right whitespace-nowrap">Ação</th>
@@ -319,10 +318,19 @@ function renderAnsweredTab(activeForm, formResponses, userMap, pastoralMap) {
               .map((resp) => {
                 const member = userMap[resp.userId];
                 const mems = getUserMemberships(member);
+                const isFam = isFamilyAccount(member);
                 return `
                   <tr class="hover:bg-[#FAF6F0]/70 align-top">
                     <td class="px-5 py-3.5 whitespace-nowrap">
                       <p class="font-bold text-[#3E2723]">${escapeHtml(member?.name || 'Membro removido')}</p>
+                      ${
+                        isFam || resp.respondentLabel
+                          ? `<p class="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-[#78350F] border border-amber-300">
+                              <i data-lucide="users" class="w-3 h-3"></i>
+                              Respondendo por: ${escapeHtml(resp.respondentLabel || member?.name || '')}
+                            </p>`
+                          : ''
+                      }
                       <div class="flex items-center gap-1 flex-wrap mt-1">
                         ${mems.slice(0, 2).map((m) => renderPastoralPill(pastoralMap[m.pastoralId], { compact: true })).join('')}
                       </div>
@@ -372,7 +380,7 @@ function renderPendingTab(activeForm, pendingMembers, pastoralMap) {
       <div class="bg-emerald-50 rounded-2xl border border-emerald-200 p-10 text-center">
         <i data-lucide="party-popper" class="w-10 h-10 text-emerald-700 mx-auto mb-3"></i>
         <h4 class="text-base font-extrabold text-emerald-900">100% de Adesão!</h4>
-        <p class="text-sm text-emerald-800 mt-1">Todos os membros ativos das pastorais de destino já responderam a este formulário.</p>
+        <p class="text-sm text-emerald-800 mt-1">Todas as contas ativas das pastorais de destino já responderam a este formulário.</p>
       </div>
     `;
   }
@@ -383,7 +391,7 @@ function renderPendingTab(activeForm, pendingMembers, pastoralMap) {
         <table class="w-full text-left border-collapse">
           <thead>
             <tr class="bg-[#FDFBF7] border-b border-[#E6DACE] text-[11px] font-bold uppercase tracking-wider text-[#6D4C41]">
-              <th class="px-5 py-3.5">Membro Pendente</th>
+              <th class="px-5 py-3.5">Membro / Conta Pendente</th>
               <th class="px-4 py-3.5">Pastorais</th>
               <th class="px-4 py-3.5">Status do Lembrete Interno</th>
               <th class="px-5 py-3.5 text-right">Notificação no Sistema</th>
@@ -397,7 +405,10 @@ function renderPendingTab(activeForm, pendingMembers, pastoralMap) {
                 return `
                   <tr class="hover:bg-[#FAF6F0]/70">
                     <td class="px-5 py-3.5">
-                      <p class="font-bold text-[#3E2723]">${escapeHtml(m.name)}</p>
+                      <div class="flex items-center gap-1.5 flex-wrap">
+                        <p class="font-bold text-[#3E2723]">${escapeHtml(m.name)}</p>
+                        ${renderFamilyAccountBadge(m, { compact: true })}
+                      </div>
                       <p class="text-xs text-[#8D6E63]">${escapeHtml(m.phone || m.email)}</p>
                     </td>
                     <td class="px-4 py-3.5">

@@ -23,6 +23,62 @@ export function getUserMemberships(user) {
   return Array.isArray(user?.memberships) ? user.memberships : [];
 }
 
+// --- Contas Compartilhadas / Familiares (Irmãos) ---
+
+export function getAccountMembers(user) {
+  if (!user) return [];
+  if (Array.isArray(user.familyMembers) && user.familyMembers.length > 0) {
+    return user.familyMembers;
+  }
+  return [{ id: user.id, name: user.name || '', birthDate: user.birthDate || '' }];
+}
+
+export function isFamilyAccount(user) {
+  return getAccountMembers(user).length > 1;
+}
+
+export function renderFamilyAccountBadge(user, { compact = false } = {}) {
+  const members = getAccountMembers(user);
+  if (members.length <= 1) return '';
+  return `
+    <span class="inline-flex items-center gap-1 ${compact ? 'px-2 py-0.5 text-[10px]' : 'px-2.5 py-0.5 text-[11px]'} rounded-full font-bold bg-amber-100 text-[#78350F] border border-amber-300">
+      <i data-lucide="users" class="w-3 h-3"></i>
+      Conta Familiar (${members.length} irmãos)
+    </span>
+  `;
+}
+
+export function resolveAssignedMemberName(userMap, userId, memberId) {
+  const acc = userMap[userId];
+  if (!acc) return 'Membro não encontrado';
+  const members = getAccountMembers(acc);
+  const target = members.find((m) => m.id === memberId) || members[0];
+  return target?.name || acc.name;
+}
+
+export function getOpenSubstitutionsForUser(user, schedules, pastorals) {
+  if (!user) return [];
+  const todayISO = getTodayISO();
+  const userPastoralIds = new Set(getMemberPastoralIds(user, pastorals));
+  const open = [];
+
+  schedules.forEach((sch) => {
+    if (sch.date < todayISO) return;
+    (sch.assignments || []).forEach((asg) => {
+      if (!asg.substitutionRequested) return;
+      if (asg.userId === user.id) return; // Não mostra pedidos feitos pelo próprio usuário no banner de colegas
+      const pid = asg.pastoralId || sch.pastoralId;
+      if (isGeneralAdmin(user) || userPastoralIds.has(pid)) {
+        open.push({ schedule: sch, assignment: asg, pastoralId: pid });
+      }
+    });
+  });
+
+  return open.sort((a, b) =>
+    `${a.schedule.date}T${a.schedule.time}`.localeCompare(`${b.schedule.date}T${b.schedule.time}`),
+  );
+}
+
 export function getCoordinatedPastoralIds(user, allPastorals = []) {
   if (!user) return [];
   if (isGeneralAdmin(user)) return allPastorals.map((p) => p.id);
@@ -187,25 +243,27 @@ export function buildUserTimeSlotIndex(schedules) {
   const counts = {};
   schedules.forEach((sch) => {
     (sch.assignments || []).forEach((asg) => {
-      const key = `${asg.userId}|${sch.date}|${sch.time}`;
+      const personKey = asg.memberId || asg.userId;
+      const key = `${personKey}|${sch.date}|${sch.time}`;
       counts[key] = (counts[key] || 0) + 1;
     });
   });
   return counts;
 }
 
-export function hasTimeConflict(slotIndex, userId, date, time) {
-  return (slotIndex[`${userId}|${date}|${time}`] || 0) > 1;
+export function hasTimeConflict(slotIndex, personId, date, time) {
+  return (slotIndex[`${personId}|${date}|${time}`] || 0) > 1;
 }
 
-export function findConflictsForMember(schedules, userId, date, time, excludeScheduleId = null) {
-  if (!userId || !date || !time) return [];
+export function findConflictsForMember(schedules, personId, date, time, excludeScheduleId = null) {
+  if (!personId || !date || !time) return [];
   const matches = [];
   schedules.forEach((sch) => {
     if (excludeScheduleId && sch.id === excludeScheduleId) return;
     if (sch.date !== date || sch.time !== time) return;
     (sch.assignments || []).forEach((asg) => {
-      if (asg.userId === userId) {
+      const asgPerson = asg.memberId || asg.userId;
+      if (asgPerson === personId) {
         matches.push({ schedule: sch, assignment: asg });
       }
     });
@@ -371,6 +429,9 @@ export function buildSyncedAgendaItems(user, { schedules, events, roles, pastora
   const memberPastoralIds = new Set(getMemberPastoralIds(user, pastorals));
   const items = [];
 
+  const isFam = isFamilyAccount(user);
+  const myAccountMembers = getAccountMembers(user);
+
   schedules.forEach((sch) => {
     const myAssignments = (sch.assignments || []).filter((a) => a.userId === user.id);
 
@@ -378,6 +439,9 @@ export function buildSyncedAgendaItems(user, { schedules, events, roles, pastora
       myAssignments.forEach((asg) => {
         const pastoral = pastoralMap[asg.pastoralId] || pastoralMap[sch.pastoralId];
         const roleName = roleMap[asg.roleId] || 'Função';
+        const assignedMember = myAccountMembers.find((m) => m.id === asg.memberId) || myAccountMembers[0];
+        const memberFirst = getFirstName(assignedMember?.name || user.name);
+        const personKey = asg.memberId || asg.userId;
         items.push({
           id: `sync_${sch.id}_${asg.id}`,
           sourceId: sch.id,
@@ -386,15 +450,17 @@ export function buildSyncedAgendaItems(user, { schedules, events, roles, pastora
           date: sch.date,
           time: sch.time,
           title: `${sch.celebrationType} • ${sch.location}`,
-          shortTag: `${sch.time} - ${sch.location} (${roleName})`,
-          roleNames: roleName,
+          shortTag: isFam
+            ? `${sch.time} - ${memberFirst} (${roleName})`
+            : `${sch.time} - ${sch.location} (${roleName})`,
+          roleNames: isFam ? `${roleName} • Escalado: ${assignedMember?.name || user.name}` : roleName,
           location: sch.location,
           pastoral,
           pastoralId: pastoral?.id || sch.pastoralId,
           eventType: 'Minha Escala',
-          description: sch.notes || `Escalado(a) como ${roleName}`,
+          description: sch.notes || (isFam ? `Escalado: ${assignedMember?.name} (${roleName})` : `Escalado(a) como ${roleName}`),
           hasSubRequest: Boolean(asg.substitutionRequested),
-          hasConflict: hasTimeConflict(slotIndex, user.id, sch.date, sch.time),
+          hasConflict: hasTimeConflict(slotIndex, personKey, sch.date, sch.time),
         });
       });
     } else if (includeManagedSchedules && canManageSchedule(user, sch)) {

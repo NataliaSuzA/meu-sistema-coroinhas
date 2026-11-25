@@ -1,12 +1,14 @@
 /**
- * Módulo 1: Início (Dashboard Multi-Pastoral v3)
- * - Banner Festivo de Aniversário quando o usuário logado faz aniversário hoje ou no mês atual
- * - Aviso Fixado com visibilidade estrita N:N por pastoral (nunca vaza aviso de outra pastoral)
- * - Banner Devocional Carmelita
- * - Widget "Minhas Próximas Escalas" com contagem regressiva e link direto para "Minhas Datas"
+ * Módulo 1: Início (Dashboard Multi-Pastoral v5)
+ * - Bloco "Pedidos de Substituição em Aberto" de colegas das suas pastorais com aceite rápido
+ * - Banner Festivo de Aniversário verificando cada irmão de Contas Familiares individualmente
+ * - Lembretes internos pendentes de formulários
+ * - Aviso Fixado com visibilidade estrita N:N por pastoral
+ * - Widget "Minhas Próximas Escalas" com tag "Escalado: [Irmão]" para contas familiares
  */
 
 import { dataService } from '../services/dataService.js';
+import { openAcceptSubstitutionModal } from './schedules.js';
 import {
   buildUserTimeSlotIndex,
   canManagePastoral,
@@ -14,21 +16,26 @@ import {
   formatDateBR,
   formatDateTimeBR,
   formatWeekdayBR,
+  getAccountMembers,
   getCoordinatedPastoralIds,
   getCountdownBadge,
   getFirstName,
   getMemberPastoralIds,
+  getOpenSubstitutionsForUser,
   getTodayISO,
   getUserMemberships,
   getUserRoleSummary,
   hasPermission,
   hasTimeConflict,
+  isFamilyAccount,
   isFormClosed,
   isGeneralAdmin,
   isPastoralScopedItemVisible,
   refreshIcons,
+  renderFamilyAccountBadge,
   renderPastoralPill,
   renderPastoralPillsList,
+  resolveAssignedMemberName,
 } from '../utils/helpers.js';
 
 let dashboardPastoralFilter = 'all';
@@ -37,7 +44,7 @@ export function resetDashboardFilter() {
   dashboardPastoralFilter = 'all';
 }
 
-export function renderDashboard(container, { user, navigate, setHeaderContext, permissions, openFormDirectly }) {
+export function renderDashboard(container, { user, navigate, setHeaderContext, permissions, openFormDirectly, onNotificationsChanged }) {
   const today = new Date();
   const todayISO = getTodayISO();
   const curMonth = today.getMonth() + 1;
@@ -48,6 +55,7 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
   const accessibleIds = getMemberPastoralIds(user, pastorals);
   const accessiblePastorals = pastorals.filter((p) => accessibleIds.includes(p.id));
   const coordIds = new Set(getCoordinatedPastoralIds(user, pastorals));
+  const isFam = isFamilyAccount(user);
 
   if (dashboardPastoralFilter !== 'all' && !accessibleIds.includes(dashboardPastoralFilter)) {
     dashboardPastoralFilter = 'all';
@@ -68,15 +76,16 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
   const userMap = Object.fromEntries(users.map((u) => [u.id, u]));
   const slotIndex = buildUserTimeSlotIndex(schedules);
 
-  // Banner Festivo de Aniversário (se usuário logado faz aniversário hoje ou neste mês)
-  let birthdayBannerHtml = '';
-  if (user.birthDate && user.birthDate.includes('-')) {
-    const [, bm, bd] = user.birthDate.split('-').map(Number);
-    const isBdayMonth = bm === curMonth;
-    const isBdayToday = bm === curMonth && bd === curDay;
-    if (isBdayMonth) {
-      const myCongrats = dataService.getBirthdayMessagesForUser(user.id);
-      birthdayBannerHtml = `
+  // Banner Festivo de Aniversário verificando todos os integrantes (irmãos) da conta logada
+  const accountMembers = getAccountMembers(user);
+  const birthdayBannerHtml = accountMembers
+    .map((member) => {
+      if (!member.birthDate || !member.birthDate.includes('-')) return '';
+      const [, bm, bd] = member.birthDate.split('-').map(Number);
+      if (bm !== curMonth) return '';
+      const isBdayToday = bm === curMonth && bd === curDay;
+      const myCongrats = dataService.getBirthdayMessagesForUser(member.id);
+      return `
         <section class="rounded-2xl bg-gradient-to-r from-[#D97706] via-[#B45309] to-[#5D4037] text-white p-5 shadow-md border border-amber-300/60">
           <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div class="flex items-start gap-3.5">
@@ -85,15 +94,15 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
               </div>
               <div>
                 <p class="text-[11px] font-extrabold uppercase tracking-[0.18em] text-amber-200">
-                  ${isBdayToday ? 'Feliz Aniversário Hoje!' : 'Seu Mês de Aniversário!'}
+                  ${isBdayToday ? 'Feliz Aniversário Hoje!' : 'Mês de Aniversário!'}
                 </p>
                 <h4 class="text-lg font-extrabold">
-                  Parabéns, ${escapeHtml(getFirstName(user.name))}! Que Deus e Santa Teresa d'Ávila abençoem muito sua vida!
+                  Parabéns, ${escapeHtml(getFirstName(member.name))}! Que Deus e Santa Teresa d'Ávila abençoem muito sua vida!
                 </h4>
                 <p class="text-xs text-amber-100 mt-1">
                   ${
                     myCongrats.length > 0
-                      ? `Você recebeu <strong>${myCongrats.length}</strong> ${myCongrats.length === 1 ? 'recado carinhoso' : 'recados carinhosos'} no Mural de Parabéns!`
+                      ? `${isFam ? `${escapeHtml(getFirstName(member.name))} recebeu` : 'Você recebeu'} <strong>${myCongrats.length}</strong> ${myCongrats.length === 1 ? 'recado carinhoso' : 'recados carinhosos'} no Mural de Parabéns!`
                       : 'Confira o Mural de Parabéns no módulo Aniversariantes.'
                   }
                 </p>
@@ -113,8 +122,71 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
           </div>
         </section>
       `;
-    }
-  }
+    })
+    .filter(Boolean)
+    .join('');
+
+  // Bloco de Pedidos de Substituição em Aberto (apenas das pastorais do usuário, excluindo seus próprios pedidos)
+  const openSubstitutions = getOpenSubstitutionsForUser(user, schedules, pastorals).filter(
+    (item) => dashboardPastoralFilter === 'all' || item.pastoralId === dashboardPastoralFilter,
+  );
+
+  const openSubstitutionsBannerHtml =
+    openSubstitutions.length > 0
+      ? `
+      <section class="rounded-2xl bg-gradient-to-r from-amber-50 via-[#FDFBF7] to-emerald-50/40 border-2 border-amber-400 p-4 sm:p-5 space-y-3 shadow-xs">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div class="flex items-center gap-2.5">
+            <div class="w-9 h-9 rounded-xl bg-[#D97706] text-white flex items-center justify-center shrink-0">
+              <i data-lucide="hand-helping" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <h4 class="text-sm font-extrabold text-[#3E2723]">Pedidos de Substituição em Aberto (${openSubstitutions.length})</h4>
+              <p class="text-xs text-[#6D4C41]">Irmãos da sua pastoral precisam de cobertura em uma escala. Pode ajudar?</p>
+            </div>
+          </div>
+          <button type="button" data-nav="schedules" class="text-xs font-bold text-[#B45309] hover:text-[#3E2723] transition">
+            Ver todas as escalas →
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          ${openSubstitutions
+            .slice(0, 4)
+            .map(({ schedule: sch, assignment: asg, pastoralId }) => {
+              const p = pastoralMap[pastoralId];
+              const roleName = roleMap[asg.roleId] || 'Função';
+              const requesterName = resolveAssignedMemberName(userMap, asg.userId, asg.memberId);
+              return `
+                <div class="rounded-xl bg-white border border-amber-300 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div class="space-y-1 min-w-0">
+                    <div class="flex items-center gap-1.5 flex-wrap">
+                      ${renderPastoralPill(p, { compact: true })}
+                      <span class="text-xs font-extrabold text-[#B45309]">${escapeHtml(roleName)}</span>
+                    </div>
+                    <p class="text-xs font-bold text-[#3E2723]">
+                      ${escapeHtml(requesterName)} • ${escapeHtml(formatDateBR(sch.date))} às ${escapeHtml(sch.time)}
+                    </p>
+                    <p class="text-[11px] text-[#6D4C41]">${escapeHtml(sch.celebrationType)} — ${escapeHtml(sch.location)}</p>
+                    ${
+                      asg.substitutionReason
+                        ? `<p class="text-[11px] text-red-800 italic">“${escapeHtml(asg.substitutionReason)}”</p>`
+                        : ''
+                    }
+                  </div>
+                  <button type="button" data-dash-accept-sub="${asg.id}" data-dash-sch-id="${sch.id}"
+                    class="shrink-0 self-start sm:self-center inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-extrabold shadow-xs transition">
+                    <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i>
+                    Assumir / Aceitar Substituição
+                  </button>
+                </div>
+              `;
+            })
+            .join('')}
+        </div>
+      </section>
+    `
+      : '';
 
   // Aviso fixado estritamente filtrado pelas pastorais do usuário
   const visibleNotices = notices.filter((n) => {
@@ -125,7 +197,7 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
   });
   const pinnedNotice = visibleNotices.find((n) => n.pinned) || null;
 
-  // Próximas 3 datas do usuário
+  // Próximas 3 datas do usuário (ou de todos os irmãos em Contas Familiares)
   const myUpcomingAssignments = [];
   schedules
     .filter((s) => s.date >= todayISO)
@@ -135,13 +207,16 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
         if (asg.userId !== user.id) return;
         const pid = asg.pastoralId || sch.pastoralId;
         if (dashboardPastoralFilter !== 'all' && pid !== dashboardPastoralFilter) return;
+        const assignedName = resolveAssignedMemberName(userMap, asg.userId, asg.memberId);
+        const personKey = asg.memberId || asg.userId;
         myUpcomingAssignments.push({
           schedule: sch,
           assignment: asg,
           pastoral: pastoralMap[pid],
+          assignedName,
           roleName: roleMap[asg.roleId] || 'Função',
           countdown: getCountdownBadge(sch.date),
-          hasConflict: hasTimeConflict(slotIndex, user.id, sch.date, sch.time),
+          hasConflict: hasTimeConflict(slotIndex, personKey, sch.date, sch.time),
         });
       });
     });
@@ -158,10 +233,13 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
     );
   }, 0);
 
-  const birthdaysThisMonth = users.filter((u) => {
-    if (!u.birthDate) return false;
-    return Number(u.birthDate.split('-')[1]) === curMonth;
-  }).length;
+  // Conta aniversariantes individuais do mês (desdobrando irmãos de contas familiares)
+  const birthdaysThisMonth = users.reduce((sum, u) => {
+    const count = getAccountMembers(u).filter(
+      (m) => m.birthDate && Number(m.birthDate.split('-')[1]) === curMonth,
+    ).length;
+    return sum + count;
+  }, 0);
 
   const pendingForms = forms.filter((f) => {
     if (isFormClosed(f)) return false;
@@ -173,7 +251,6 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
   const roleSummary = getUserRoleSummary(user, pastorals);
   const myMemberships = getUserMemberships(user);
 
-  // Lembretes internos pendentes de formulários para o usuário logado
   const activeReminders = dataService
     .getNotificationsForUser(user.id)
     .filter((n) => n.type === 'form_reminder' && !n.completed)
@@ -209,6 +286,7 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
   container.innerHTML = `
     <div class="space-y-6">
       ${reminderBannersHtml}
+      ${openSubstitutionsBannerHtml}
       ${birthdayBannerHtml}
 
       <!-- Cabeçalho Interno Dinâmico + Filtro de Pastoral -->
@@ -222,10 +300,11 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border ${roleSummary.badgeClass}">
               ${escapeHtml(roleSummary.label)}
             </span>
+            ${renderFamilyAccountBadge(user, { compact: true })}
           </div>
 
           <h3 class="text-2xl font-extrabold text-[#3E2723]">
-            Paz e bem, ${escapeHtml(getFirstName(user.name))}!
+            Paz e bem, ${escapeHtml(isFam ? user.name.split('(')[0].trim() : getFirstName(user.name))}!
           </h3>
 
           <div class="flex items-center gap-1.5 flex-wrap">
@@ -361,7 +440,7 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
             </div>
           </div>
           <p class="text-2xl font-extrabold text-[#3E2723] mt-3">${myUpcomingAssignments.length}</p>
-          <p class="text-xs text-[#8D6E63] mt-0.5">próximas escalas</p>
+          <p class="text-xs text-[#8D6E63] mt-0.5">${isFam ? 'escalas da família' : 'próximas escalas'}</p>
         </button>
 
         <button type="button" data-nav="birthdays"
@@ -407,7 +486,7 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
           <button type="button" data-nav="attendance"
             class="text-left bg-white rounded-2xl p-5 border border-[#E6DACE] hover:border-emerald-600 shadow-xs hover:shadow-md transition group">
             <div class="flex items-center justify-between">
-              <span class="text-xs font-semibold text-[#6D4C41] uppercase tracking-wider">Minha Presença</span>
+              <span class="text-xs font-semibold text-[#6D4C41] uppercase tracking-wider">${isFam ? 'Presença da Família' : 'Minha Presença'}</span>
               <div class="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-800 flex items-center justify-center group-hover:bg-emerald-700 group-hover:text-white transition">
                 <i data-lucide="check-square" class="w-4 h-4"></i>
               </div>
@@ -427,8 +506,8 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
               <i data-lucide="calendar-heart" class="w-4 h-4"></i>
             </div>
             <div>
-              <h4 class="text-base font-bold text-[#3E2723]">Minhas Próximas Escalas</h4>
-              <p class="text-xs text-[#6D4C41]">Seus próximos 3 compromissos com contagem regressiva</p>
+              <h4 class="text-base font-bold text-[#3E2723]">${isFam ? 'Próximas Escalas da Família' : 'Minhas Próximas Escalas'}</h4>
+              <p class="text-xs text-[#6D4C41]">Próximos 3 compromissos com contagem regressiva</p>
             </div>
           </div>
           <button type="button" data-nav="my_dates"
@@ -450,7 +529,7 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
               : `
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
               ${nextThree
-                .map(({ schedule: sch, assignment: asg, pastoral, roleName, countdown, hasConflict }) => `
+                .map(({ schedule: sch, assignment: asg, pastoral, assignedName, roleName, countdown, hasConflict }) => `
                   <article class="rounded-2xl border-2 border-amber-400/80 bg-gradient-to-b from-amber-50/50 to-white p-4 flex flex-col justify-between gap-3 shadow-xs">
                     <div>
                       <div class="flex items-center justify-between gap-2 mb-2 flex-wrap">
@@ -459,7 +538,16 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
                         </span>
                         <span class="text-xs font-extrabold text-[#3E2723]">${escapeHtml(sch.time)}</span>
                       </div>
-                      <div class="mb-2">${renderPastoralPill(pastoral, { compact: true })}</div>
+                      <div class="flex items-center gap-1.5 flex-wrap mb-2">
+                        ${renderPastoralPill(pastoral, { compact: true })}
+                        ${
+                          isFam
+                            ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#3E2723] text-amber-300">
+                                Escalado: ${escapeHtml(assignedName)}
+                              </span>`
+                            : ''
+                        }
+                      </div>
                       <h5 class="font-bold text-[#3E2723] text-sm">${escapeHtml(sch.celebrationType)}</h5>
                       <p class="text-xs text-[#6D4C41] mt-0.5 capitalize">${escapeHtml(formatWeekdayBR(sch.date))}, ${escapeHtml(formatDateBR(sch.date))}</p>
 
@@ -490,7 +578,12 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
                               <i data-lucide="alert-circle" class="w-3.5 h-3.5 shrink-0"></i>
                               Substituição solicitada
                             </div>`
-                          : ''
+                          : asg.substitutionAccepted && asg.substitutedFromName
+                            ? `<div class="text-[11px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                                <i data-lucide="check-circle-2" class="w-3.5 h-3.5 shrink-0"></i>
+                                Substituindo ${escapeHtml(getFirstName(asg.substitutedFromName))}
+                              </div>`
+                            : ''
                       }
                     </div>
                   </article>
@@ -506,12 +599,22 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
 
   container.querySelector('#dashboard-pastoral-filter')?.addEventListener('change', (e) => {
     dashboardPastoralFilter = e.target.value;
-    renderDashboard(container, { user, navigate, setHeaderContext, permissions, openFormDirectly });
+    renderDashboard(container, { user, navigate, setHeaderContext, permissions, openFormDirectly, onNotificationsChanged });
+  });
+
+  container.querySelectorAll('[data-dash-accept-sub]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      openAcceptSubstitutionModal(btn.dataset.dashSchId, btn.dataset.dashAcceptSub, user, () => {
+        onNotificationsChanged?.();
+        renderDashboard(container, { user, navigate, setHeaderContext, permissions, openFormDirectly, onNotificationsChanged });
+      });
+    });
   });
 
   container.querySelectorAll('[data-answer-reminder-form]').forEach((btn) => {
     btn.addEventListener('click', () => {
       dataService.markNotificationRead(btn.dataset.reminderId);
+      onNotificationsChanged?.();
       openFormDirectly?.(btn.dataset.answerReminderForm);
     });
   });

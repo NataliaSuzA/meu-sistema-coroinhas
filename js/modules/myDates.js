@@ -1,8 +1,8 @@
 /**
- * Módulo dedicado "Minhas Datas"
- * Lista exclusivamente as datas, horários, locais, pastorais e funções em que o próprio
- * usuário logado está escalado, ordenadas cronologicamente, com contagem regressiva
- * ("Hoje", "Amanhã", "Em X dias"), alerta amigável de conflito e botão "Solicitar Substituição".
+ * Módulo dedicado "Minhas Datas" (Suporte a Contas Familiares + Cancelamento de Substituição)
+ * - Em Contas Familiares, exibe todas as escalas de todos os irmãos vinculados,
+ *   destacando em cada card a tag "Escalado: [Nome do Integrante]".
+ * - Permite solicitar substituição e, enquanto não aceita, clicar em "Cancelar Pedido de Substituição".
  */
 
 import { dataService } from '../services/dataService.js';
@@ -13,37 +13,47 @@ import {
   formatDateBR,
   formatWeekdayBR,
   getCountdownBadge,
+  getFirstName,
   getTodayISO,
   hasTimeConflict,
+  isFamilyAccount,
   openModal,
   refreshIcons,
+  renderFamilyAccountBadge,
   renderPastoralPill,
+  resolveAssignedMemberName,
   showToast,
 } from '../utils/helpers.js';
 
 let scopeFilter = 'upcoming'; // 'upcoming' | 'all'
 
-export function renderMyDatesContent(targetEl, { user, onChanged, openLiturgyFor, compactHeader = false }) {
+export function renderMyDatesContent(targetEl, { user, onChanged, onNotificationsChanged, openLiturgyFor, compactHeader = false }) {
   const todayISO = getTodayISO();
   const pastorals = dataService.getPastorals();
   const pastoralMap = Object.fromEntries(pastorals.map((p) => [p.id, p]));
   const roles = dataService.getRoles();
   const roleMap = Object.fromEntries(roles.map((r) => [r.id, r]));
+  const users = dataService.getUsers();
+  const userMap = Object.fromEntries(users.map((u) => [u.id, u]));
   const schedules = dataService.getSchedules();
   const slotIndex = buildUserTimeSlotIndex(schedules);
+  const isFam = isFamilyAccount(user);
 
   const allMine = [];
   schedules.forEach((sch) => {
     (sch.assignments || []).forEach((asg) => {
       if (asg.userId !== user.id) return;
       const pastoral = pastoralMap[asg.pastoralId] || pastoralMap[sch.pastoralId];
+      const assignedName = resolveAssignedMemberName(userMap, asg.userId, asg.memberId);
+      const personKey = asg.memberId || asg.userId;
       allMine.push({
         schedule: sch,
         assignment: asg,
         pastoral,
+        assignedName,
         roleName: roleMap[asg.roleId]?.name || 'Função',
         countdown: getCountdownBadge(sch.date),
-        hasConflict: hasTimeConflict(slotIndex, user.id, sch.date, sch.time),
+        hasConflict: hasTimeConflict(slotIndex, personKey, sch.date, sch.time),
       });
     });
   });
@@ -58,23 +68,37 @@ export function renderMyDatesContent(targetEl, { user, onChanged, openLiturgyFor
       ? allMine.filter((item) => item.schedule.date >= todayISO)
       : allMine;
 
+  const rerender = () => {
+    onNotificationsChanged?.();
+    if (onChanged) onChanged();
+    else renderMyDatesContent(targetEl, { user, onChanged, onNotificationsChanged, openLiturgyFor, compactHeader });
+  };
+
   targetEl.innerHTML = `
     <div class="space-y-5">
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         ${
           compactHeader
             ? `<div>
-                <h4 class="text-base font-extrabold text-[#3E2723]">Minhas Datas Agendadas</h4>
-                <p class="text-xs text-[#6D4C41]">Exclusivamente seus compromissos em ordem cronológica, com contagem regressiva.</p>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <h4 class="text-base font-extrabold text-[#3E2723]">Minhas Datas Agendadas</h4>
+                  ${renderFamilyAccountBadge(user, { compact: true })}
+                </div>
+                <p class="text-xs text-[#6D4C41]">
+                  ${isFam ? 'Todas as escalas dos irmãos vinculados à conta familiar, em ordem cronológica.' : 'Exclusivamente seus compromissos em ordem cronológica, com contagem regressiva.'}
+                </p>
               </div>`
             : `<div>
-                <span class="inline-flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider text-[#B45309] bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full mb-1.5">
-                  <i data-lucide="calendar-clock" class="w-3 h-3"></i>
-                  Compromissos Pessoais
-                </span>
+                <div class="flex items-center gap-2 flex-wrap mb-1.5">
+                  <span class="inline-flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider text-[#B45309] bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full">
+                    <i data-lucide="calendar-clock" class="w-3 h-3"></i>
+                    ${isFam ? 'Compromissos da Família' : 'Compromissos Pessoais'}
+                  </span>
+                  ${renderFamilyAccountBadge(user, { compact: true })}
+                </div>
                 <h3 class="text-xl font-extrabold text-[#3E2723]">Minhas Datas</h3>
                 <p class="text-sm text-[#6D4C41] mt-0.5">
-                  Todas as datas, horários, locais e funções em que você está escalado(a), em ordem cronológica.
+                  ${isFam ? 'Todas as datas, horários, locais e funções de todos os irmãos desta conta familiar.' : 'Todas as datas, horários, locais e funções em que você está escalado(a), em ordem cronológica.'}
                 </p>
               </div>`
         }
@@ -101,13 +125,13 @@ export function renderMyDatesContent(targetEl, { user, onChanged, openLiturgyFor
         <div class="bg-white rounded-2xl border border-dashed border-[#D7C4B2] p-10 text-center">
           <i data-lucide="calendar-heart" class="w-10 h-10 text-[#8D6E63] mx-auto mb-3"></i>
           <h4 class="text-base font-bold text-[#3E2723]">Nenhuma data encontrada neste filtro</h4>
-          <p class="text-sm text-[#6D4C41] mt-1">Quando você for escalado(a) em alguma pastoral, seus compromissos aparecerão automaticamente aqui.</p>
+          <p class="text-sm text-[#6D4C41] mt-1">Quando houver escalas vinculadas à sua conta, elas aparecerão automaticamente aqui.</p>
         </div>
       `
           : `
         <div class="space-y-3.5">
           ${displayed
-            .map(({ schedule: sch, assignment: asg, pastoral, roleName, countdown, hasConflict }) => {
+            .map(({ schedule: sch, assignment: asg, pastoral, assignedName, roleName, countdown, hasConflict }) => {
               const isPast = countdown.diffDays < 0;
               return `
                 <article class="bg-white rounded-2xl border-2 ${
@@ -135,12 +159,25 @@ export function renderMyDatesContent(targetEl, { user, onChanged, openLiturgyFor
                         </span>
                         ${renderPastoralPill(pastoral, { compact: true })}
                         ${
+                          isFam
+                            ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-[#3E2723] text-amber-300">
+                                <i data-lucide="user-check" class="w-3 h-3"></i>
+                                Escalado: ${escapeHtml(assignedName)}
+                              </span>`
+                            : ''
+                        }
+                        ${
                           asg.substitutionRequested
                             ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-700 border border-red-300">
                                 <i data-lucide="alert-circle" class="w-3 h-3"></i>
                                 Substituição Solicitada
                               </span>`
-                            : ''
+                            : asg.substitutionAccepted && asg.substitutedFromName
+                              ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                  <i data-lucide="check-circle-2" class="w-3 h-3"></i>
+                                  Substituição Confirmada • Substituindo ${escapeHtml(getFirstName(asg.substitutedFromName))}
+                                </span>`
+                              : ''
                         }
                       </div>
 
@@ -160,7 +197,7 @@ export function renderMyDatesContent(targetEl, { user, onChanged, openLiturgyFor
                         hasConflict
                           ? `<div class="inline-flex items-center gap-1.5 mt-1 text-[11px] font-semibold text-amber-950 bg-amber-100 border border-amber-300 rounded-lg px-2.5 py-1">
                               <i data-lucide="clock-alert" class="w-3.5 h-3.5 text-[#B45309] shrink-0"></i>
-                              Conflito amigável: você possui outra escala neste mesmo dia e horário.
+                              Conflito amigável: ${escapeHtml(getFirstName(assignedName))} possui outra escala neste mesmo dia e horário.
                             </div>`
                           : ''
                       }
@@ -187,7 +224,13 @@ export function renderMyDatesContent(targetEl, { user, onChanged, openLiturgyFor
                             <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
                             Solicitar Substituição
                           </button>`
-                        : ''
+                        : !isPast && asg.substitutionRequested
+                          ? `<button type="button" data-md-cancel-sub="${asg.id}" data-md-sch="${sch.id}"
+                              class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-[#5D4037] bg-white hover:bg-[#FAF6F0] border border-[#D7C4B2] transition">
+                              <i data-lucide="x-circle" class="w-3.5 h-3.5 text-red-600"></i>
+                              Cancelar Pedido de Substituição
+                            </button>`
+                          : ''
                     }
                   </div>
                 </article>
@@ -203,7 +246,7 @@ export function renderMyDatesContent(targetEl, { user, onChanged, openLiturgyFor
   targetEl.querySelectorAll('[data-mydates-scope]').forEach((btn) => {
     btn.addEventListener('click', () => {
       scopeFilter = btn.dataset.mydatesScope;
-      renderMyDatesContent(targetEl, { user, onChanged, openLiturgyFor, compactHeader });
+      renderMyDatesContent(targetEl, { user, onChanged, onNotificationsChanged, openLiturgyFor, compactHeader });
     });
   });
 
@@ -215,19 +258,24 @@ export function renderMyDatesContent(targetEl, { user, onChanged, openLiturgyFor
 
   targetEl.querySelectorAll('[data-md-sub]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      openQuickSubModal(btn.dataset.mdSch, btn.dataset.mdSub, () => {
-        if (onChanged) onChanged();
-        else renderMyDatesContent(targetEl, { user, onChanged, openLiturgyFor, compactHeader });
-      });
+      openQuickSubModal(btn.dataset.mdSch, btn.dataset.mdSub, rerender);
+    });
+  });
+
+  targetEl.querySelectorAll('[data-md-cancel-sub]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      dataService.cancelSubstitutionRequest(btn.dataset.mdSch, btn.dataset.mdCancelSub);
+      showToast('Pedido de substituição cancelado. Escala mantida.');
+      rerender();
     });
   });
 
   refreshIcons();
 }
 
-export function renderMyDates(container, { user, setHeaderContext, openLiturgyFor }) {
+export function renderMyDates(container, { user, setHeaderContext, openLiturgyFor, onNotificationsChanged }) {
   setHeaderContext?.('Minhas Datas', 'Seus compromissos pessoais em ordem cronológica');
-  renderMyDatesContent(container, { user, openLiturgyFor, compactHeader: false });
+  renderMyDatesContent(container, { user, openLiturgyFor, onNotificationsChanged, compactHeader: false });
 }
 
 function openQuickSubModal(scheduleId, assignmentId, onDone) {
@@ -236,7 +284,7 @@ function openQuickSubModal(scheduleId, assignmentId, onDone) {
     bodyHtml: `
       <form id="md-sub-form" class="space-y-4">
         <p class="text-sm text-[#5D4037]">
-          Informe o motivo da sua indisponibilidade para que a coordenação da pastoral possa reatribuir outro membro.
+          Informe o motivo da indisponibilidade. Todos os colegas e coordenadores da sua pastoral serão notificados para que alguém possa assumir esta escala.
         </p>
         <div>
           <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1.5">Motivo da Substituição *</label>
@@ -256,7 +304,7 @@ function openQuickSubModal(scheduleId, assignmentId, onDone) {
         const reason = String(new FormData(e.target).get('reason'));
         dataService.requestSubstitution(scheduleId, assignmentId, reason);
         closeModal();
-        showToast('Substituição solicitada! A coordenação da pastoral foi sinalizada.');
+        showToast('Substituição solicitada! Colegas e coordenação da pastoral foram notificados.');
         onDone();
       });
     },

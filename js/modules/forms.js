@@ -1,9 +1,8 @@
 /**
- * Módulo 7: Formulários Avançados
- * - Criação segmentada por 1 ou mais pastorais (N:N) + "Toda a Paróquia" (Admin Geral)
- * - Data e Hora de Encerramento (deadline) com bloqueio automático após expirar
- * - Membro pode editar a própria resposta enquanto aberto e NÃO validado pela Coordenação
- * - Após validação, exibe selo verde "Validada pela Coordenação" e bloqueia edição
+ * Módulo 7: Formulários Avançados + Suporte a Contas Familiares
+ * - Quando uma Conta Familiar (2+ irmãos) abre um formulário, exibe seletor
+ *   "Para quem você está respondendo?" (Ambos/Todos ou um integrante específico).
+ * - Criação segmentada por 1 ou mais pastorais (N:N) + Prazo (deadline) + Validação.
  */
 
 import { dataService } from '../services/dataService.js';
@@ -13,8 +12,10 @@ import {
   escapeHtml,
   formatDateBR,
   formatDateTimeBR,
+  getAccountMembers,
   getCoordinatedPastoralIds,
   hasPermission,
+  isFamilyAccount,
   isFormClosed,
   isFormExpiredByDeadline,
   isGeneralAdmin,
@@ -36,6 +37,7 @@ export function renderForms(container, { user, navigate, permissions, onNotifica
   const canCreate = hasPermission(user, 'forms_manage', permissions);
   const canAnswer = hasPermission(user, 'forms_answer', permissions);
   const canSeeResponses = hasPermission(user, 'responses', permissions);
+  const isFam = isFamilyAccount(user);
 
   const pastorals = dataService.getPastorals();
   const pastoralMap = Object.fromEntries(pastorals.map((p) => [p.id, p]));
@@ -97,14 +99,15 @@ export function renderForms(container, { user, navigate, permissions, onNotifica
           ${visibleForms
             .map((form) => {
               const formResponses = responses.filter((r) => r.formId === form.id);
-              const myResponse = formResponses.find((r) => r.userId === user.id);
+              const myResponses = formResponses.filter((r) => r.userId === user.id);
+              const myResponse = myResponses[0] || null;
               const canManageThis = canCreate && (generalAdmin || canManageAnyOfPastorals(user, form.pastoralIds));
               const closed = isFormClosed(form);
               const expired = isFormExpiredByDeadline(form);
-              const isValidated = Boolean(myResponse?.validated);
+              const allMyValidated = myResponses.length > 0 && myResponses.every((r) => r.validated);
 
               let actionHtml = '';
-              if (myResponse && isValidated) {
+              if (!isFam && myResponse && myResponse.validated) {
                 actionHtml = `
                   <button type="button" data-view-form="${form.id}"
                     class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition">
@@ -132,14 +135,14 @@ export function renderForms(container, { user, navigate, permissions, onNotifica
                         : 'bg-[#3E2723] hover:bg-[#5D4037] text-white'
                     }">
                     <i data-lucide="${myResponse ? 'edit-3' : 'send'}" class="w-3.5 h-3.5 ${myResponse ? 'text-[#B45309]' : 'text-amber-400'}"></i>
-                    ${myResponse ? 'Editar Minha Resposta' : 'Responder Formulário'}
+                    ${myResponse ? (isFam ? 'Gerenciar / Editar Respostas' : 'Editar Minha Resposta') : 'Responder Formulário'}
                   </button>
                 `;
               }
 
               return `
                 <article class="bg-white rounded-2xl border-2 ${
-                  isValidated ? 'border-emerald-300' : closed ? 'border-stone-200 opacity-90' : 'border-[#E6DACE]'
+                  allMyValidated ? 'border-emerald-300' : closed ? 'border-stone-200 opacity-90' : 'border-[#E6DACE]'
                 } p-5 flex flex-col justify-between gap-4 shadow-xs">
                   <div>
                     <div class="flex items-start justify-between gap-3 mb-2.5">
@@ -153,7 +156,7 @@ export function renderForms(container, { user, navigate, permissions, onNotifica
                           ${closed ? 'Encerrado' : 'Aberto'}
                         </span>
                         ${
-                          isValidated
+                          allMyValidated
                             ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">
                                 <i data-lucide="badge-check" class="w-3.5 h-3.5"></i>
                                 Validada pela Coordenação
@@ -161,7 +164,7 @@ export function renderForms(container, { user, navigate, permissions, onNotifica
                             : myResponse
                               ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-[#92400E] border border-amber-300">
                                   <i data-lucide="check-circle-2" class="w-3 h-3"></i>
-                                  Respondido (Editável)
+                                  Respondido${isFam && myResponse.respondentLabel ? ` (${escapeHtml(myResponse.respondentLabel.split('(')[0].trim())})` : ' (Editável)'}
                                 </span>`
                               : ''
                         }
@@ -219,13 +222,13 @@ export function renderForms(container, { user, navigate, permissions, onNotifica
 
   container.querySelector('#btn-go-responses')?.addEventListener('click', () => navigate('responses'));
   container.querySelector('#btn-new-form')?.addEventListener('click', () => {
-    openFormBuilderModal(null, user, () => renderForms(container, { user, navigate, permissions }));
+    openFormBuilderModal(null, user, () => renderForms(container, { user, navigate, permissions, onNotificationsChanged }));
   });
 
   container.querySelectorAll('[data-edit-form]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const form = dataService.getForms().find((f) => f.id === btn.dataset.editForm);
-      if (form) openFormBuilderModal(form, user, () => renderForms(container, { user, navigate, permissions }));
+      if (form) openFormBuilderModal(form, user, () => renderForms(container, { user, navigate, permissions, onNotificationsChanged }));
     });
   });
 
@@ -235,7 +238,7 @@ export function renderForms(container, { user, navigate, permissions, onNotifica
       if (!form) return;
       dataService.saveForm({ ...form, active: !form.active });
       showToast(`Formulário ${!form.active ? 'reaberto' : 'encerrado'}.`);
-      renderForms(container, { user, navigate, permissions });
+      renderForms(container, { user, navigate, permissions, onNotificationsChanged });
     });
   });
 
@@ -244,7 +247,7 @@ export function renderForms(container, { user, navigate, permissions, onNotifica
       if (!confirm('Deseja excluir este formulário e todas as suas respostas?')) return;
       dataService.deleteForm(btn.dataset.deleteForm);
       showToast('Formulário excluído.');
-      renderForms(container, { user, navigate, permissions });
+      renderForms(container, { user, navigate, permissions, onNotificationsChanged });
     });
   });
 
@@ -274,7 +277,6 @@ export function renderForms(container, { user, navigate, permissions, onNotifica
 
   refreshIcons();
 
-  // Abertura direta disparada por "Responder Agora" no Sino de Notificações ou Banner do Início
   if (pendingFormToAutoOpen) {
     const targetId = pendingFormToAutoOpen;
     pendingFormToAutoOpen = null;
@@ -288,8 +290,28 @@ export function renderForms(container, { user, navigate, permissions, onNotifica
   }
 }
 
-function openAnswerFormModal(form, user, { readOnly = false }, onSaved) {
-  const existing = dataService.getResponses().find((r) => r.formId === form.id && r.userId === user.id);
+function openAnswerFormModal(form, user, { readOnly = false, initialRespondentId = null }, onSaved) {
+  const isFam = isFamilyAccount(user);
+  const familyMembers = getAccountMembers(user);
+  const myResponses = dataService.getResponses().filter((r) => r.formId === form.id && r.userId === user.id);
+
+  const respondentOptions = isFam
+    ? [
+        {
+          id: 'all_family',
+          label: `Ambos / Todos os irmãos (${familyMembers.map((m) => m.name.split(' ')[0]).join(' & ')})`,
+        },
+        ...familyMembers.map((m) => ({ id: m.id, label: m.name })),
+      ]
+    : [{ id: user.id, label: user.name }];
+
+  const selectedRespondentId =
+    initialRespondentId ||
+    myResponses[0]?.respondentMemberId ||
+    respondentOptions[0].id;
+
+  const selectedOpt = respondentOptions.find((o) => o.id === selectedRespondentId) || respondentOptions[0];
+  const existing = myResponses.find((r) => (r.respondentMemberId || r.userId) === selectedOpt.id) || null;
   const locked = readOnly || Boolean(existing?.validated) || isFormClosed(form);
 
   const questionsHtml = form.questions
@@ -350,6 +372,29 @@ function openAnswerFormModal(form, user, { readOnly = false }, onSaved) {
     bodyHtml: `
       <form id="answer-form" class="space-y-5">
         ${
+          isFam
+            ? `
+          <div class="p-4 rounded-xl bg-amber-50 border border-amber-300 space-y-2">
+            <label for="family-respondent-select" class="block text-xs font-extrabold uppercase tracking-wider text-[#78350F] flex items-center gap-1.5">
+              <i data-lucide="users" class="w-4 h-4 text-[#B45309]"></i>
+              Para quem você está respondendo? *
+            </label>
+            <select id="family-respondent-select" name="respondentMemberId"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-amber-300 bg-white text-sm font-bold text-[#3E2723] outline-none focus:border-[#B45309]">
+              ${respondentOptions
+                .map((opt) => {
+                  const hasResp = myResponses.some((r) => (r.respondentMemberId || r.userId) === opt.id);
+                  return `<option value="${escapeHtml(opt.id)}" ${opt.id === selectedOpt.id ? 'selected' : ''}>${escapeHtml(opt.label)}${hasResp ? ' ✓ (Respondido)' : ''}</option>`;
+                })
+                .join('')}
+            </select>
+            <p class="text-[11px] text-[#6D4C41]">Esta identificação ficará visível para a Coordenação na tela de Respostas e no CSV.</p>
+          </div>
+        `
+            : ''
+        }
+
+        ${
           existing?.validated
             ? `<div class="rounded-xl bg-emerald-50 border border-emerald-300 px-4 py-3 text-xs font-bold text-emerald-900 flex items-center gap-2">
                 <i data-lucide="badge-check" class="w-4 h-4 text-emerald-700 shrink-0"></i>
@@ -362,7 +407,7 @@ function openAnswerFormModal(form, user, { readOnly = false }, onSaved) {
                 </div>`
               : existing
                 ? `<div class="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-xs font-medium text-[#4E342E]">
-                    Você já enviou este formulário. Enquanto não for validado pela Coordenação e estiver dentro do prazo, você pode editar sua resposta livremente.
+                    Já existe uma resposta registrada para <strong>${escapeHtml(selectedOpt.label)}</strong>. Enquanto não for validada e estiver no prazo, você pode editá-la livremente.
                   </div>`
                 : ''
         }
@@ -384,6 +429,10 @@ function openAnswerFormModal(form, user, { readOnly = false }, onSaved) {
       </form>
     `,
     onMount(bodyEl) {
+      bodyEl.querySelector('#family-respondent-select')?.addEventListener('change', (e) => {
+        openAnswerFormModal(form, user, { readOnly, initialRespondentId: e.target.value }, onSaved);
+      });
+
       bodyEl.querySelector('#cancel-ans-btn').addEventListener('click', closeModal);
       if (!locked) {
         bodyEl.querySelector('#answer-form').addEventListener('submit', (e) => {
@@ -399,7 +448,13 @@ function openAnswerFormModal(form, user, { readOnly = false }, onSaved) {
           form.questions.forEach((q) => {
             answers[q.id] = String(fd.get(`q_${q.id}`) || '').trim();
           });
-          const res = dataService.saveResponse({ formId: form.id, userId: user.id, answers });
+          const res = dataService.saveResponse({
+            formId: form.id,
+            userId: user.id,
+            respondentMemberId: selectedOpt.id,
+            respondentLabel: isFam ? selectedOpt.label : user.name,
+            answers,
+          });
           if (!res.ok) {
             showToast(res.error, 'error');
             return;

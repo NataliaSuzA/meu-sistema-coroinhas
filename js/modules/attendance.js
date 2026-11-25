@@ -1,8 +1,8 @@
 /**
- * Módulo 11: Presença Multi-Pastoral com Isolamento de Coordenadores
- * - Coordenadores registram chamadas e acompanham frequência APENAS das missas/eventos
- *   pertencentes às pastorais que coordenam (Coordenação Geral vê todas).
- * - Membros simples visualizam sua própria frequência unificada entre suas pastorais.
+ * Módulo 11: Presença Multi-Pastoral Individualizada (inclui irmãos de Contas Familiares)
+ * - Coordenadores registram chamadas por integrante individual (memberId) apenas nas
+ *   pastorais que coordenam (Coordenação Geral vê todas).
+ * - Contas Familiares veem a frequência e histórico separados por irmão.
  */
 
 import { dataService } from '../services/dataService.js';
@@ -10,12 +10,16 @@ import {
   canManagePastoral,
   escapeHtml,
   formatDateBR,
+  getAccountMembers,
   getCoordinatedPastoralIds,
   getUserMemberships,
   hasPermission,
+  isFamilyAccount,
   isGeneralAdmin,
   refreshIcons,
+  renderFamilyAccountBadge,
   renderPastoralPill,
+  resolveAssignedMemberName,
   showToast,
 } from '../utils/helpers.js';
 
@@ -23,11 +27,26 @@ let selectedSessionId = null;
 let summaryPastoralFilter = 'all';
 
 function buildAttendanceSessions(schedules, events, users, pastoralMap) {
+  const userMap = Object.fromEntries(users.map((u) => [u.id, u]));
   const activeUsers = users.filter((u) => u.status === 'Ativo');
   const sessions = [];
 
   schedules.forEach((sch) => {
-    const memberIds = Array.from(new Set((sch.assignments || []).map((a) => a.userId)));
+    const seen = new Set();
+    const participants = [];
+    (sch.assignments || []).forEach((a) => {
+      const pid = a.memberId || a.userId;
+      if (seen.has(pid)) return;
+      seen.add(pid);
+      const acc = userMap[a.userId];
+      participants.push({
+        participantId: pid,
+        userId: a.userId,
+        name: resolveAssignedMemberName(userMap, a.userId, a.memberId),
+        isFamily: isFamilyAccount(acc),
+      });
+    });
+
     const p = pastoralMap[sch.pastoralId];
     sessions.push({
       id: sch.id,
@@ -38,14 +57,26 @@ function buildAttendanceSessions(schedules, events, users, pastoralMap) {
       date: sch.date,
       time: sch.time,
       location: sch.location,
-      memberIds,
+      participants,
     });
   });
 
   events.forEach((evt) => {
-    const invited = activeUsers
+    const participants = [];
+    activeUsers
       .filter((u) => evt.pastoralId === 'all' || getUserMemberships(u).some((m) => m.pastoralId === evt.pastoralId))
-      .map((u) => u.id);
+      .forEach((u) => {
+        const isFam = isFamilyAccount(u);
+        getAccountMembers(u).forEach((m) => {
+          participants.push({
+            participantId: m.id,
+            userId: u.id,
+            name: m.name,
+            isFamily: isFam,
+          });
+        });
+      });
+
     sessions.push({
       id: evt.id,
       kind: evt.type,
@@ -55,20 +86,20 @@ function buildAttendanceSessions(schedules, events, users, pastoralMap) {
       date: evt.date,
       time: evt.time,
       location: evt.location,
-      memberIds: invited,
+      participants,
     });
   });
 
   return sessions.sort((a, b) => `${b.date}T${b.time}`.localeCompare(`${a.date}T${a.time}`));
 }
 
-function computeMemberStats(userId, allowedSessionIds, attendanceMap) {
+function computeParticipantStats(participantId, allowedSessionIds, attendanceMap) {
   let present = 0;
   let justified = 0;
   let absent = 0;
 
   allowedSessionIds.forEach((sid) => {
-    const status = attendanceMap[sid]?.[userId];
+    const status = attendanceMap[sid]?.[participantId];
     if (status === 'Presente') present += 1;
     else if (status === 'Falta Justificada') justified += 1;
     else if (status === 'Falta') absent += 1;
@@ -88,7 +119,6 @@ export function renderAttendance(container, { user, permissions }) {
   const schedules = dataService.getSchedules();
   const events = dataService.getEvents();
   const attendanceMap = dataService.getAttendanceMap();
-  const userMap = Object.fromEntries(users.map((u) => [u.id, u]));
 
   const allSessions = buildAttendanceSessions(schedules, events, users, pastoralMap);
 
@@ -117,13 +147,24 @@ export function renderAttendance(container, { user, permissions }) {
       : managedSessions.filter((s) => s.pastoralId === summaryPastoralFilter);
   const summarySessionIds = summarySessions.map((s) => s.id);
 
-  const summaryUsers = users.filter((u) => {
-    if (u.isGeneralAdmin) return false;
-    if (summaryPastoralFilter !== 'all') {
-      return getUserMemberships(u).some((m) => m.pastoralId === summaryPastoralFilter);
-    }
-    if (generalAdmin) return true;
-    return getUserMemberships(u).some((m) => managedIds.has(m.pastoralId));
+  // Desdobra contas em integrantes individuais para o indicador de frequência
+  const summaryParticipants = [];
+  users.forEach((u) => {
+    if (u.isGeneralAdmin) return;
+    const inScope =
+      summaryPastoralFilter !== 'all'
+        ? getUserMemberships(u).some((m) => m.pastoralId === summaryPastoralFilter)
+        : generalAdmin || getUserMemberships(u).some((m) => managedIds.has(m.pastoralId));
+    if (!inScope) return;
+    const isFam = isFamilyAccount(u);
+    getAccountMembers(u).forEach((m) => {
+      summaryParticipants.push({
+        participantId: m.id,
+        name: m.name,
+        isFamily: isFam,
+        memberships: getUserMemberships(u).filter((x) => generalAdmin || managedIds.has(x.pastoralId)),
+      });
+    });
   });
 
   container.innerHTML = `
@@ -133,7 +174,7 @@ export function renderAttendance(container, { user, permissions }) {
         <p class="text-sm text-[#6D4C41] mt-0.5">
           ${
             generalAdmin
-              ? 'Registre chamadas em todas as missas e ensaios da paróquia.'
+              ? 'Registre chamadas individuais (inclusive por irmão em contas familiares) em todas as celebrações e ensaios.'
               : `Gerencie chamadas e frequência apenas nas pastorais sob sua coordenação (${managedPastorals.map((p) => p.shortName).join(', ')}).`
           }
         </p>
@@ -165,7 +206,7 @@ export function renderAttendance(container, { user, permissions }) {
 
         <div class="p-5">
           ${
-            !activeSession || activeSession.memberIds.length === 0
+            !activeSession || activeSession.participants.length === 0
               ? `<p class="text-sm text-[#8D6E63] text-center py-6">Nenhuma celebração ou ensaio com membros vinculado às pastorais que você coordena.</p>`
               : `
             <div class="mb-4 flex items-center justify-between flex-wrap gap-2 text-xs text-[#6D4C41]">
@@ -173,17 +214,25 @@ export function renderAttendance(container, { user, permissions }) {
                 ${renderPastoralPill(activeSession.pastoral, { compact: true })}
                 <span><strong>Local:</strong> ${escapeHtml(activeSession.location)} • <strong>Data:</strong> ${formatDateBR(activeSession.date)} às ${escapeHtml(activeSession.time)}</span>
               </div>
-              <span>${activeSession.memberIds.length} membros na chamada</span>
+              <span>${activeSession.participants.length} integrantes na chamada</span>
             </div>
             <div class="divide-y divide-[#E6DACE]/70 border border-[#E6DACE] rounded-xl overflow-hidden">
-              ${activeSession.memberIds
-                .map((uid) => {
-                  const member = userMap[uid];
-                  if (!member) return '';
-                  const currentStatus = sessionRecord[uid] || '';
+              ${activeSession.participants
+                .map((p) => {
+                  const currentStatus = sessionRecord[p.participantId] || '';
                   return `
                     <div class="px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white hover:bg-[#FAF6F0]/80">
-                      <span class="font-bold text-sm text-[#3E2723]">${escapeHtml(member.name)}</span>
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <span class="font-bold text-sm text-[#3E2723]">${escapeHtml(p.name)}</span>
+                        ${
+                          p.isFamily
+                            ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-[#78350F] border border-amber-300">
+                                <i data-lucide="users" class="w-3 h-3"></i>
+                                Conta Familiar
+                              </span>`
+                            : ''
+                        }
+                      </div>
                       <div class="flex items-center gap-1.5 flex-wrap">
                         ${['Presente', 'Falta Justificada', 'Falta']
                           .map((st) => {
@@ -195,7 +244,7 @@ export function renderAttendance(container, { user, permissions }) {
                                   ? 'bg-[#D97706] text-white border-[#D97706]'
                                   : 'bg-red-700 text-white border-red-700';
                             return `
-                              <button type="button" data-mark-uid="${uid}" data-mark-status="${st}"
+                              <button type="button" data-mark-pid="${p.participantId}" data-mark-status="${st}"
                                 class="px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
                                   active ? activeStyles : 'bg-white text-[#5D4037] border-[#E6DACE] hover:bg-[#F5EFE6]'
                                 }">
@@ -215,12 +264,12 @@ export function renderAttendance(container, { user, permissions }) {
         </div>
       </section>
 
-      <!-- Indicador Percentual por Membro -->
+      <!-- Indicador Percentual por Integrante -->
       <section class="bg-white rounded-2xl border border-[#E6DACE] shadow-xs overflow-hidden">
         <div class="px-6 py-4 border-b border-[#E6DACE]/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#FDFBF7]">
           <div>
-            <h4 class="text-base font-bold text-[#3E2723]">Indicador de Frequência por Membro</h4>
-            <p class="text-xs text-[#6D4C41]">Percentual calculado sobre as chamadas das pastorais selecionadas</p>
+            <h4 class="text-base font-bold text-[#3E2723]">Indicador de Frequência Individual</h4>
+            <p class="text-xs text-[#6D4C41]">Percentual calculado individualmente para cada integrante</p>
           </div>
           <select id="attendance-pastoral-filter"
             class="px-3 py-1.5 rounded-xl border border-[#E6DACE] bg-white text-xs font-semibold text-[#3E2723] outline-none focus:border-[#B45309]">
@@ -235,7 +284,7 @@ export function renderAttendance(container, { user, permissions }) {
           <table class="w-full text-left border-collapse text-sm">
             <thead>
               <tr class="bg-[#FDFBF7] border-b border-[#E6DACE] text-[11px] font-bold uppercase tracking-wider text-[#6D4C41]">
-                <th class="px-5 py-3">Membro</th>
+                <th class="px-5 py-3">Integrante</th>
                 <th class="px-4 py-3 text-center">Presente</th>
                 <th class="px-4 py-3 text-center">Justificada</th>
                 <th class="px-4 py-3 text-center">Falta</th>
@@ -243,9 +292,9 @@ export function renderAttendance(container, { user, permissions }) {
               </tr>
             </thead>
             <tbody class="divide-y divide-[#E6DACE]/60">
-              ${summaryUsers
+              ${summaryParticipants
                 .map((m) => {
-                  const st = computeMemberStats(m.id, summarySessionIds, attendanceMap);
+                  const st = computeParticipantStats(m.participantId, summarySessionIds, attendanceMap);
                   const barColor =
                     st.percentage === null
                       ? 'bg-stone-300'
@@ -254,13 +303,19 @@ export function renderAttendance(container, { user, permissions }) {
                         : st.percentage >= 50
                           ? 'bg-[#D97706]'
                           : 'bg-red-600';
-                  const mems = getUserMemberships(m).filter((x) => generalAdmin || managedIds.has(x.pastoralId));
                   return `
                     <tr class="hover:bg-[#FAF6F0]/80">
                       <td class="px-5 py-3">
-                        <p class="font-bold text-[#3E2723]">${escapeHtml(m.name)}</p>
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                          <p class="font-bold text-[#3E2723]">${escapeHtml(m.name)}</p>
+                          ${
+                            m.isFamily
+                              ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-[#78350F] border border-amber-300">Conta Familiar</span>`
+                              : ''
+                          }
+                        </div>
                         <div class="flex items-center gap-1 flex-wrap mt-1">
-                          ${mems.map((x) => renderPastoralPill(pastoralMap[x.pastoralId], { compact: true })).join('')}
+                          ${m.memberships.map((x) => renderPastoralPill(pastoralMap[x.pastoralId], { compact: true })).join('')}
                         </div>
                       </td>
                       <td class="px-4 py-3 text-center font-bold text-emerald-700">${st.present}</td>
@@ -297,10 +352,10 @@ export function renderAttendance(container, { user, permissions }) {
     renderAttendance(container, { user, permissions });
   });
 
-  container.querySelectorAll('[data-mark-uid]').forEach((btn) => {
+  container.querySelectorAll('[data-mark-pid]').forEach((btn) => {
     btn.addEventListener('click', () => {
       if (!activeSession) return;
-      dataService.setAttendanceStatus(activeSession.id, btn.dataset.markUid, btn.dataset.markStatus);
+      dataService.setAttendanceStatus(activeSession.id, btn.dataset.markPid, btn.dataset.markStatus);
       showToast(`Presença registrada: ${btn.dataset.markStatus}.`);
       renderAttendance(container, { user, permissions });
     });
@@ -311,81 +366,113 @@ export function renderAttendance(container, { user, permissions }) {
 
 function renderMemberAttendanceView(container, { user, sessions, attendanceMap }) {
   const allIds = sessions.map((s) => s.id);
-  const stats = computeMemberStats(user.id, allIds, attendanceMap);
-  const myHistory = sessions
-    .map((s) => {
-      const status = attendanceMap[s.id]?.[user.id];
-      if (!status) return null;
-      return { ...s, status };
-    })
-    .filter(Boolean);
+  const members = getAccountMembers(user);
+  const isFam = isFamilyAccount(user);
+
+  const memberBlocks = members.map((member) => {
+    const stats = computeParticipantStats(member.id, allIds, attendanceMap);
+    const history = sessions
+      .map((s) => {
+        const status = attendanceMap[s.id]?.[member.id];
+        if (!status) return null;
+        return { ...s, status };
+      })
+      .filter(Boolean);
+    return { member, stats, history };
+  });
 
   container.innerHTML = `
     <div class="space-y-6">
-      <div>
-        <h3 class="text-xl font-extrabold text-[#3E2723]">Minha Frequência</h3>
-        <p class="text-sm text-[#6D4C41] mt-0.5">
-          Acompanhe sua participação consolidada em todas as pastorais em que atua.
-        </p>
-      </div>
-
-      <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <div class="bg-[#3E2723] text-white rounded-2xl p-5 shadow-sm">
-          <p class="text-xs font-bold uppercase tracking-wider text-amber-400">Frequência Geral</p>
-          <p class="text-3xl font-extrabold mt-2">${stats.percentage === null ? '—' : `${stats.percentage}%`}</p>
-          <div class="mt-3 h-2 rounded-full bg-white/15 overflow-hidden">
-            <div class="h-full rounded-full bg-amber-400" style="width: ${stats.percentage ?? 0}%"></div>
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <h3 class="text-xl font-extrabold text-[#3E2723]">${isFam ? 'Frequência da Família' : 'Minha Frequência'}</h3>
+            ${renderFamilyAccountBadge(user)}
           </div>
-        </div>
-        <div class="bg-white rounded-2xl border border-emerald-200 p-5">
-          <p class="text-xs font-bold uppercase tracking-wider text-emerald-800">Presenças</p>
-          <p class="text-3xl font-extrabold text-[#3E2723] mt-2">${stats.present}</p>
-        </div>
-        <div class="bg-white rounded-2xl border border-amber-300 p-5">
-          <p class="text-xs font-bold uppercase tracking-wider text-[#B45309]">Faltas Justificadas</p>
-          <p class="text-3xl font-extrabold text-[#3E2723] mt-2">${stats.justified}</p>
-        </div>
-        <div class="bg-white rounded-2xl border border-red-200 p-5">
-          <p class="text-xs font-bold uppercase tracking-wider text-red-700">Faltas</p>
-          <p class="text-3xl font-extrabold text-[#3E2723] mt-2">${stats.absent}</p>
+          <p class="text-sm text-[#6D4C41] mt-0.5">
+            ${
+              isFam
+                ? 'Acompanhe individualmente a frequência de cada irmão vinculado a esta conta.'
+                : 'Acompanhe sua participação consolidada em todas as pastorais em que atua.'
+            }
+          </p>
         </div>
       </div>
 
-      <section class="bg-white rounded-2xl border border-[#E6DACE] shadow-xs overflow-hidden">
-        <div class="px-6 py-4 border-b border-[#E6DACE]/80 bg-[#FDFBF7]">
-          <h4 class="text-base font-bold text-[#3E2723]">Histórico de Chamadas</h4>
-        </div>
-        <div class="divide-y divide-[#E6DACE]/60">
-          ${
-            myHistory.length === 0
-              ? `<p class="p-8 text-center text-sm text-[#8D6E63]">Nenhuma chamada registrada ainda para o seu perfil.</p>`
-              : myHistory
-                  .map((h) => {
-                    const badge =
-                      h.status === 'Presente'
-                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                        : h.status === 'Falta Justificada'
-                          ? 'bg-amber-50 text-[#92400E] border-amber-300'
-                          : 'bg-red-50 text-red-700 border-red-200';
-                    return `
-                      <div class="px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <div class="space-y-1">
-                          <div class="flex items-center gap-2 flex-wrap">
-                            ${renderPastoralPill(h.pastoral, { compact: true })}
-                            <span class="text-sm font-bold text-[#3E2723]">${escapeHtml(h.title)}</span>
-                          </div>
-                          <p class="text-xs text-[#6D4C41]">${escapeHtml(formatDateBR(h.date))} às ${escapeHtml(h.time)} • ${escapeHtml(h.location)}</p>
-                        </div>
-                        <span class="self-start sm:self-center inline-flex px-3 py-1 rounded-full text-xs font-bold border ${badge}">
-                          ${escapeHtml(h.status)}
-                        </span>
-                      </div>
-                    `;
-                  })
-                  .join('')
-          }
-        </div>
-      </section>
+      ${memberBlocks
+        .map(({ member, stats, history }) => {
+          return `
+            <div class="space-y-4 ${isFam ? 'p-5 rounded-2xl bg-[#FAF6F0]/70 border border-[#E6DACE]' : ''}">
+              ${
+                isFam
+                  ? `<div class="flex items-center gap-2">
+                      <span class="w-2.5 h-2.5 rounded-full bg-[#B45309]"></span>
+                      <h4 class="text-base font-extrabold text-[#3E2723]">${escapeHtml(member.name)}</h4>
+                    </div>`
+                  : ''
+              }
+
+              <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                <div class="bg-[#3E2723] text-white rounded-2xl p-5 shadow-sm">
+                  <p class="text-xs font-bold uppercase tracking-wider text-amber-400">Frequência Geral</p>
+                  <p class="text-3xl font-extrabold mt-2">${stats.percentage === null ? '—' : `${stats.percentage}%`}</p>
+                  <div class="mt-3 h-2 rounded-full bg-white/15 overflow-hidden">
+                    <div class="h-full rounded-full bg-amber-400" style="width: ${stats.percentage ?? 0}%"></div>
+                  </div>
+                </div>
+                <div class="bg-white rounded-2xl border border-emerald-200 p-5">
+                  <p class="text-xs font-bold uppercase tracking-wider text-emerald-800">Presenças</p>
+                  <p class="text-3xl font-extrabold text-[#3E2723] mt-2">${stats.present}</p>
+                </div>
+                <div class="bg-white rounded-2xl border border-amber-300 p-5">
+                  <p class="text-xs font-bold uppercase tracking-wider text-[#B45309]">Faltas Justificadas</p>
+                  <p class="text-3xl font-extrabold text-[#3E2723] mt-2">${stats.justified}</p>
+                </div>
+                <div class="bg-white rounded-2xl border border-red-200 p-5">
+                  <p class="text-xs font-bold uppercase tracking-wider text-red-700">Faltas</p>
+                  <p class="text-3xl font-extrabold text-[#3E2723] mt-2">${stats.absent}</p>
+                </div>
+              </div>
+
+              <section class="bg-white rounded-2xl border border-[#E6DACE] shadow-xs overflow-hidden">
+                <div class="px-6 py-3.5 border-b border-[#E6DACE]/80 bg-[#FDFBF7]">
+                  <h4 class="text-sm font-bold text-[#3E2723]">Histórico de Chamadas ${isFam ? `— ${escapeHtml(member.name)}` : ''}</h4>
+                </div>
+                <div class="divide-y divide-[#E6DACE]/60">
+                  ${
+                    history.length === 0
+                      ? `<p class="p-6 text-center text-sm text-[#8D6E63]">Nenhuma chamada registrada ainda para ${escapeHtml(member.name)}.</p>`
+                      : history
+                          .map((h) => {
+                            const badge =
+                              h.status === 'Presente'
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                : h.status === 'Falta Justificada'
+                                  ? 'bg-amber-50 text-[#92400E] border-amber-300'
+                                  : 'bg-red-50 text-red-700 border-red-200';
+                            return `
+                              <div class="px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div class="space-y-1">
+                                  <div class="flex items-center gap-2 flex-wrap">
+                                    ${renderPastoralPill(h.pastoral, { compact: true })}
+                                    <span class="text-sm font-bold text-[#3E2723]">${escapeHtml(h.title)}</span>
+                                  </div>
+                                  <p class="text-xs text-[#6D4C41]">${escapeHtml(formatDateBR(h.date))} às ${escapeHtml(h.time)} • ${escapeHtml(h.location)}</p>
+                                </div>
+                                <span class="self-start sm:self-center inline-flex px-3 py-1 rounded-full text-xs font-bold border ${badge}">
+                                  ${escapeHtml(h.status)}
+                                </span>
+                              </div>
+                            `;
+                          })
+                          .join('')
+                  }
+                </div>
+              </section>
+            </div>
+          `;
+        })
+        .join('')}
     </div>
   `;
 

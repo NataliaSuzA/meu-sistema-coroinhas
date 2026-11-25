@@ -1,6 +1,6 @@
 /**
- * Serviço de domínio v4 — Multi-Pastoral, Locais, Tipos de Celebração,
- * Lembretes Internos (Notificações In-App), Liturgia/Roteiro e Permissões.
+ * Serviço de domínio v5 — Contas Familiares (irmãos), Aceite/Cancelamento de
+ * Substituições com notificações automáticas, Locais, Tipos de Celebração e Permissões.
  */
 
 import { storageAdapter, COLLECTIONS } from './storage.js';
@@ -8,6 +8,25 @@ import { buildDefaultPermissions, buildSeedData } from './seedData.js';
 
 function genId(prefix) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function normalizeFamilyMembers(user) {
+  if (Array.isArray(user.familyMembers) && user.familyMembers.length > 0) {
+    return user.familyMembers.map((m, idx) => ({
+      id: m.id || (idx === 0 && user.id ? user.id : genId('mem')),
+      name: String(m.name || user.name || '').trim(),
+      birthDate: m.birthDate || user.birthDate || '',
+    }));
+  }
+  return [{ id: user.id || genId('mem'), name: String(user.name || '').trim(), birthDate: user.birthDate || '' }];
+}
+
+function resolveMemberNameFromList(users, userId, memberId) {
+  const acc = users.find((u) => u.id === userId);
+  if (!acc) return 'Membro';
+  const members = normalizeFamilyMembers(acc);
+  const found = members.find((m) => m.id === memberId) || members[0];
+  return found?.name || acc.name;
 }
 
 export const dataService = {
@@ -181,7 +200,7 @@ export const dataService = {
     storageAdapter.saveCollection(COLLECTIONS.CELEBRATION_TYPES, this.getCelebrationTypes().filter((c) => c.id !== id));
   },
 
-  // --- Usuários & Meu Perfil ---
+  // --- Usuários & Contas Familiares ---
   getUsers() {
     return storageAdapter.getCollection(COLLECTIONS.USERS, []);
   },
@@ -196,44 +215,82 @@ export const dataService = {
     );
   },
 
+  /**
+   * Retorna cada integrante individualmente (desdobrando Contas Familiares em irmãos)
+   * para montagem de Escalas, Presença e Aniversariantes.
+   */
+  getActiveParticipantsByPastoral(pastoralId) {
+    const accounts = this.getActiveUsersByPastoral(pastoralId);
+    const participants = [];
+    accounts.forEach((acc) => {
+      const members = normalizeFamilyMembers(acc);
+      members.forEach((m) => {
+        participants.push({
+          accountId: acc.id,
+          memberId: m.id,
+          name: m.name,
+          birthDate: m.birthDate,
+          isFamily: members.length > 1,
+          accountName: acc.name,
+          account: acc,
+        });
+      });
+    });
+    return participants;
+  },
+
   saveUser(user) {
     const list = this.getUsers();
     const cleanMemberships = (user.memberships || []).filter((m) => m.pastoralId && m.role);
-    if (user.id) {
-      const idx = list.findIndex((u) => u.id === user.id);
-      if (idx >= 0) {
-        list[idx] = {
-          ...list[idx],
-          ...user,
-          password: user.password || list[idx].password || 'pastoral2026',
-          memberships: cleanMemberships,
-        };
-      } else {
-        list.push({ ...user, password: user.password || 'pastoral2026', memberships: cleanMemberships });
-      }
-    } else {
-      user = {
-        ...user,
-        id: genId('usr'),
-        password: user.password || 'pastoral2026',
-        memberships: cleanMemberships,
-      };
-      list.push(user);
-    }
+    const id = user.id || genId('usr');
+    const familyMembers = normalizeFamilyMembers({ ...user, id });
+    const primaryName =
+      familyMembers.length > 1
+        ? user.name?.trim() || `Família (${familyMembers.map((m) => m.name.split(' ')[0]).join(' & ')})`
+        : familyMembers[0].name;
+    const primaryBirth = familyMembers[0].birthDate || user.birthDate || '';
+
+    const idx = list.findIndex((u) => u.id === id);
+    const existing = idx >= 0 ? list[idx] : null;
+    const payload = {
+      ...(existing || {}),
+      ...user,
+      id,
+      name: primaryName,
+      birthDate: primaryBirth,
+      password: user.password || existing?.password || 'pastoral2026',
+      memberships: cleanMemberships,
+      familyMembers,
+    };
+
+    if (idx >= 0) list[idx] = payload;
+    else list.push(payload);
     storageAdapter.saveCollection(COLLECTIONS.USERS, list);
-    return user;
+    return payload;
   },
 
-  updateOwnProfile(userId, { name, email, phone, birthDate }) {
+  updateOwnProfile(userId, { name, email, phone, birthDate, familyMembers }) {
     const list = this.getUsers();
     const idx = list.findIndex((u) => u.id === userId);
     if (idx < 0) return null;
+    const normalizedMembers = normalizeFamilyMembers({
+      id: userId,
+      name,
+      birthDate,
+      familyMembers,
+    });
+    const derivedName =
+      normalizedMembers.length > 1
+        ? String(name || '').trim() || `Família (${normalizedMembers.map((m) => m.name.split(' ')[0]).join(' & ')})`
+        : normalizedMembers[0].name;
+
     list[idx] = {
       ...list[idx],
-      name: String(name).trim(),
+      name: derivedName,
       email: String(email).trim(),
       phone: String(phone).trim(),
-      birthDate,
+      birthDate: normalizedMembers[0].birthDate || birthDate || '',
+      familyMembers: normalizedMembers,
     };
     storageAdapter.saveCollection(COLLECTIONS.USERS, list);
     return list[idx];
@@ -256,7 +313,7 @@ export const dataService = {
     storageAdapter.saveCollection(COLLECTIONS.USERS, this.getUsers().filter((u) => u.id !== id));
   },
 
-  // --- Funções por Pastoral ---
+  // --- Funções ---
   getRoles() {
     return storageAdapter.getCollection(COLLECTIONS.ROLES, []);
   },
@@ -290,7 +347,7 @@ export const dataService = {
     storageAdapter.saveCollection(COLLECTIONS.ROLES, this.getRoles().filter((r) => r.id !== id));
   },
 
-  // --- Escalas ---
+  // --- Escalas & Fluxo Completo de Substituição ---
   getSchedules() {
     return storageAdapter.getCollection(COLLECTIONS.SCHEDULES, []);
   },
@@ -306,8 +363,12 @@ export const dataService = {
       pastoralId: a.pastoralId || schedule.pastoralId,
       roleId: a.roleId,
       userId: a.userId,
+      memberId: a.memberId || a.userId,
       substitutionRequested: Boolean(a.substitutionRequested),
       substitutionReason: a.substitutionReason || '',
+      substitutionAccepted: Boolean(a.substitutionAccepted),
+      substitutedFromName: a.substitutedFromName || '',
+      substitutedAt: a.substitutedAt || null,
     }));
 
     const distinctPastorals = Array.from(new Set(normalizedAssignments.map((a) => a.pastoralId).filter(Boolean)));
@@ -348,26 +409,176 @@ export const dataService = {
     if (!sch) return null;
     const asg = sch.assignments.find((a) => a.id === assignmentId);
     if (!asg) return null;
+
     asg.substitutionRequested = true;
     asg.substitutionReason = reason.trim();
+    asg.substitutionAccepted = false;
     storageAdapter.saveCollection(COLLECTIONS.SCHEDULES, list);
+
+    // Notifica no sino todos os outros membros ativos e coordenadores da mesma pastoral!
+    const users = this.getUsers();
+    const pastoralId = asg.pastoralId || sch.pastoralId;
+    const pastoral = this.getPastoralById(pastoralId);
+    const role = this.getRoleById(asg.roleId);
+    const requesterName = resolveMemberNameFromList(users, asg.userId, asg.memberId);
+    const dateBR = sch.date.split('-').reverse().join('/');
+    const colleagues = this.getActiveUsersByPastoral(pastoralId).filter((u) => u.id !== asg.userId);
+
+    const notifs = this.getNotifications();
+    const nowISO = new Date().toISOString();
+    colleagues.forEach((col) => {
+      notifs.unshift({
+        id: genId('notif'),
+        type: 'substitution_open',
+        recipientUserId: col.id,
+        senderUserId: asg.userId,
+        scheduleId: sch.id,
+        assignmentId: asg.id,
+        pastoralId,
+        title: `Pedido de Substituição em Aberto (${pastoral?.shortName || 'Pastoral'})`,
+        message: `${requesterName} pediu substituição em ${role?.name || 'Função'} na missa de ${dateBR} às ${sch.time} (${sch.location}).`,
+        createdAt: nowISO,
+        read: false,
+        completed: false,
+      });
+    });
+    storageAdapter.saveCollection(COLLECTIONS.NOTIFICATIONS, notifs);
     return sch;
   },
 
-  reassignScheduleMember(scheduleId, assignmentId, newUserId) {
+  cancelSubstitutionRequest(scheduleId, assignmentId) {
     const list = this.getSchedules();
     const sch = list.find((s) => s.id === scheduleId);
     if (!sch) return null;
     const asg = sch.assignments.find((a) => a.id === assignmentId);
     if (!asg) return null;
-    asg.userId = newUserId;
+
     asg.substitutionRequested = false;
     asg.substitutionReason = '';
     storageAdapter.saveCollection(COLLECTIONS.SCHEDULES, list);
+
+    // Conclui notificações de pedido aberto dessa posição
+    const notifs = this.getNotifications();
+    notifs.forEach((n) => {
+      if (n.type === 'substitution_open' && n.assignmentId === assignmentId) {
+        n.completed = true;
+        n.read = true;
+      }
+    });
+    storageAdapter.saveCollection(COLLECTIONS.NOTIFICATIONS, notifs);
     return sch;
   },
 
-  // --- Eventos da Agenda ---
+  acceptSubstitution(scheduleId, assignmentId, acceptorUserId, acceptorMemberId) {
+    const list = this.getSchedules();
+    const sch = list.find((s) => s.id === scheduleId);
+    if (!sch) return null;
+    const asg = sch.assignments.find((a) => a.id === assignmentId);
+    if (!asg || !asg.substitutionRequested) return null;
+
+    const users = this.getUsers();
+    const prevUserId = asg.userId;
+    const prevMemberName = resolveMemberNameFromList(users, asg.userId, asg.memberId);
+    const newMemberName = resolveMemberNameFromList(users, acceptorUserId, acceptorMemberId || acceptorUserId);
+    const pastoralId = asg.pastoralId || sch.pastoralId;
+    const pastoral = this.getPastoralById(pastoralId);
+    const role = this.getRoleById(asg.roleId);
+    const dateBR = sch.date.split('-').reverse().join('/');
+    const nowISO = new Date().toISOString();
+
+    // Troca automática do titular na escala
+    asg.userId = acceptorUserId;
+    asg.memberId = acceptorMemberId || acceptorUserId;
+    asg.substitutionRequested = false;
+    asg.substitutionReason = '';
+    asg.substitutionAccepted = true;
+    asg.substitutedFromName = prevMemberName;
+    asg.substitutedAt = nowISO;
+    storageAdapter.saveCollection(COLLECTIONS.SCHEDULES, list);
+
+    // Fecha notificações de pedido aberto + envia confirmação para quem pediu e para os coordenadores da pastoral
+    const notifs = this.getNotifications();
+    notifs.forEach((n) => {
+      if (n.type === 'substitution_open' && n.assignmentId === assignmentId) {
+        n.completed = true;
+        n.read = true;
+      }
+    });
+
+    // Notifica quem solicitou a substituição
+    notifs.unshift({
+      id: genId('notif'),
+      type: 'substitution_confirmed',
+      recipientUserId: prevUserId,
+      senderUserId: acceptorUserId,
+      scheduleId: sch.id,
+      assignmentId: asg.id,
+      pastoralId,
+      title: `Substituição Confirmada (${pastoral?.shortName || 'Pastoral'})`,
+      message: `${newMemberName} assumiu sua função de ${role?.name || 'Função'} na missa de ${dateBR} às ${sch.time} (${sch.location}).`,
+      createdAt: nowISO,
+      read: false,
+      completed: false,
+    });
+
+    // Notifica os coordenadores daquela pastoral
+    const coords = this.getActiveUsersByPastoral(pastoralId).filter(
+      (u) =>
+        u.id !== prevUserId &&
+        u.id !== acceptorUserId &&
+        (u.memberships || []).some((m) => m.pastoralId === pastoralId && m.role === 'Coordenador'),
+    );
+    coords.forEach((c) => {
+      notifs.unshift({
+        id: genId('notif'),
+        type: 'substitution_confirmed',
+        recipientUserId: c.id,
+        senderUserId: acceptorUserId,
+        scheduleId: sch.id,
+        assignmentId: asg.id,
+        pastoralId,
+        title: `Substituição Confirmada — ${pastoral?.shortName || 'Pastoral'}`,
+        message: `${newMemberName} assumiu ${role?.name || 'Função'} no lugar de ${prevMemberName} na missa de ${dateBR} às ${sch.time}.`,
+        createdAt: nowISO,
+        read: false,
+        completed: false,
+      });
+    });
+
+    storageAdapter.saveCollection(COLLECTIONS.NOTIFICATIONS, notifs);
+    return { schedule: sch, prevMemberName, newMemberName };
+  },
+
+  reassignScheduleMember(scheduleId, assignmentId, newUserId, newMemberId) {
+    const list = this.getSchedules();
+    const sch = list.find((s) => s.id === scheduleId);
+    if (!sch) return null;
+    const asg = sch.assignments.find((a) => a.id === assignmentId);
+    if (!asg) return null;
+    const users = this.getUsers();
+    const prevMemberName = resolveMemberNameFromList(users, asg.userId, asg.memberId);
+
+    asg.userId = newUserId;
+    asg.memberId = newMemberId || newUserId;
+    asg.substitutionRequested = false;
+    asg.substitutionReason = '';
+    asg.substitutionAccepted = true;
+    asg.substitutedFromName = prevMemberName;
+    asg.substitutedAt = new Date().toISOString();
+    storageAdapter.saveCollection(COLLECTIONS.SCHEDULES, list);
+
+    const notifs = this.getNotifications();
+    notifs.forEach((n) => {
+      if (n.type === 'substitution_open' && n.assignmentId === assignmentId) {
+        n.completed = true;
+        n.read = true;
+      }
+    });
+    storageAdapter.saveCollection(COLLECTIONS.NOTIFICATIONS, notifs);
+    return sch;
+  },
+
+  // --- Eventos ---
   getEvents() {
     return storageAdapter.getCollection(COLLECTIONS.EVENTS, []);
   },
@@ -396,7 +607,7 @@ export const dataService = {
     storageAdapter.saveCollection(COLLECTIONS.EVENTS, this.getEvents().filter((e) => e.id !== id));
   },
 
-  // --- Bloco de Notas ---
+  // --- Notas ---
   getNotes() {
     return storageAdapter.getCollection(COLLECTIONS.NOTES, []);
   },
@@ -419,7 +630,7 @@ export const dataService = {
     storageAdapter.saveCollection(COLLECTIONS.NOTES, this.getNotes().filter((n) => n.id !== id));
   },
 
-  // --- Formulários & Respostas ---
+  // --- Formulários & Respostas (com suporte a Conta Familiar) ---
   getForms() {
     return storageAdapter.getCollection(COLLECTIONS.FORMS, []);
   },
@@ -457,7 +668,13 @@ export const dataService = {
 
   saveResponse(response) {
     const list = this.getResponses();
-    const existingIdx = list.findIndex((r) => r.formId === response.formId && r.userId === response.userId);
+    const respondentMemberId = response.respondentMemberId || response.userId;
+    const existingIdx = list.findIndex(
+      (r) =>
+        r.formId === response.formId &&
+        r.userId === response.userId &&
+        (r.respondentMemberId || r.userId) === respondentMemberId,
+    );
     if (existingIdx >= 0 && list[existingIdx].validated) {
       return { ok: false, error: 'Esta resposta já foi validada pela Coordenação e não pode ser editada.' };
     }
@@ -465,6 +682,8 @@ export const dataService = {
       id: existingIdx >= 0 ? list[existingIdx].id : genId('resp'),
       formId: response.formId,
       userId: response.userId,
+      respondentMemberId,
+      respondentLabel: response.respondentLabel || '',
       answers: response.answers,
       submittedAt: new Date().toISOString(),
       validated: false,
@@ -475,9 +694,7 @@ export const dataService = {
     else list.unshift(payload);
     storageAdapter.saveCollection(COLLECTIONS.RESPONSES, list);
 
-    // Marca lembretes pendentes deste formulário para este usuário como concluídos automaticamente
     this.completeFormRemindersForUser(response.formId, response.userId);
-
     return { ok: true, response: payload };
   },
 
@@ -492,7 +709,7 @@ export const dataService = {
     return target;
   },
 
-  // --- Notificações Internas (Lembretes In-App) ---
+  // --- Notificações Internas ---
   getNotifications() {
     return storageAdapter.getCollection(COLLECTIONS.NOTIFICATIONS, []);
   },
@@ -609,9 +826,7 @@ export const dataService = {
       const tPids = target.pastoralIds || ['all'];
       list.forEach((n) => {
         const nPids = n.pastoralIds || ['all'];
-        if (tPids.includes('all') || nPids.some((pid) => tPids.includes(pid))) {
-          n.pinned = false;
-        }
+        if (tPids.includes('all') || nPids.some((pid) => tPids.includes(pid))) n.pinned = false;
       });
     }
     target.pinned = willPin;
@@ -622,27 +837,27 @@ export const dataService = {
     storageAdapter.saveCollection(COLLECTIONS.NOTICES, this.getNotices().filter((n) => n.id !== id));
   },
 
-  // --- Presença ---
+  // --- Presença (por memberId individual) ---
   getAttendanceMap() {
     return storageAdapter.getDocument(COLLECTIONS.ATTENDANCE, {});
   },
 
-  setAttendanceStatus(sourceId, userId, status) {
+  setAttendanceStatus(sourceId, participantId, status) {
     const map = this.getAttendanceMap();
     if (!map[sourceId]) map[sourceId] = {};
-    map[sourceId][userId] = status;
+    map[sourceId][participantId] = status;
     storageAdapter.saveDocument(COLLECTIONS.ATTENDANCE, map);
     return map;
   },
 
-  // --- Mural de Parabéns ---
+  // --- Mural de Parabéns (por memberId individual) ---
   getBirthdayMessages() {
     return storageAdapter.getCollection(COLLECTIONS.BIRTHDAY_MESSAGES, []);
   },
 
-  getBirthdayMessagesForUser(recipientUserId) {
+  getBirthdayMessagesForUser(recipientMemberId) {
     return this.getBirthdayMessages()
-      .filter((m) => m.recipientUserId === recipientUserId)
+      .filter((m) => m.recipientUserId === recipientMemberId)
       .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   },
 

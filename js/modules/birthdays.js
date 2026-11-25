@@ -1,8 +1,7 @@
 /**
- * Módulo 10: Aniversariantes + Mural de Parabéns
- * - Botão "Deixar Parabéns" em cada card (mensagens rápidas prontas ou recado personalizado)
- * - Mini-mural dentro de cada card mostrando quem enviou, pastoral e data/hora
- * - Atalho rápido de WhatsApp e filtros por mês e pastoral
+ * Módulo 10: Aniversariantes + Mural de Parabéns (Individualizado por Integrante)
+ * - Lê a Data de Nascimento de cada integrante individualmente (inclusive irmãos em Contas Familiares).
+ * - Cada irmão aparece no seu respectivo mês de aniversário com seu próprio card e Mural de Parabéns.
  */
 
 import { dataService } from '../services/dataService.js';
@@ -11,8 +10,10 @@ import {
   closeModal,
   escapeHtml,
   formatDateTimeBR,
+  getAccountMembers,
   getInitials,
   getUserMemberships,
+  isFamilyAccount,
   isGeneralAdmin,
   MONTHS_PT,
   openModal,
@@ -49,26 +50,39 @@ export function renderBirthdays(container, { user }) {
   const users = dataService.getUsers();
   const userMap = Object.fromEntries(users.map((u) => [u.id, u]));
 
-  const birthdaysInMonth = users
-    .map((u) => {
-      const parsed = parseMonthDay(u.birthDate);
-      if (!parsed || parsed.month !== selectedMonth) return null;
-      if (selectedPastoralId !== 'all') {
-        const inPastoral = getUserMemberships(u).some((m) => m.pastoralId === selectedPastoralId);
-        if (!inPastoral) return null;
-      }
-      return {
-        ...u,
+  // Desdobra todas as contas em integrantes individuais para ler a data de nascimento de cada irmão
+  const birthdaysInMonth = [];
+  users.forEach((u) => {
+    if (selectedPastoralId !== 'all') {
+      const inPastoral = getUserMemberships(u).some((m) => m.pastoralId === selectedPastoralId);
+      if (!inPastoral) return;
+    }
+    const members = getAccountMembers(u);
+    const isFam = isFamilyAccount(u);
+
+    members.forEach((member) => {
+      const parsed = parseMonthDay(member.birthDate);
+      if (!parsed || parsed.month !== selectedMonth) return;
+      birthdaysInMonth.push({
+        id: member.id,
+        accountId: u.id,
+        name: member.name,
+        birthDate: member.birthDate,
+        phone: u.phone,
+        isGeneralAdmin: u.isGeneralAdmin,
+        memberships: u.memberships,
+        isFamily: isFam,
+        accountName: u.name,
         bDay: parsed.day,
         bMonth: parsed.month,
         ageTurning: currentYear - parsed.year,
         isToday: parsed.month === todayMonth && parsed.day === todayDay,
-        wallMessages: dataService.getBirthdayMessagesForUser(u.id),
-      };
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.bDay - b.bDay);
+        wallMessages: dataService.getBirthdayMessagesForUser(member.id),
+      });
+    });
+  });
 
+  birthdaysInMonth.sort((a, b) => a.bDay - b.bDay);
   const todayBirthdays = birthdaysInMonth.filter((b) => b.isToday);
 
   container.innerHTML = `
@@ -77,7 +91,7 @@ export function renderBirthdays(container, { user }) {
         <div>
           <h3 class="text-xl font-extrabold text-[#3E2723]">Aniversariantes &amp; Mural de Parabéns</h3>
           <p class="text-sm text-[#6D4C41] mt-0.5">
-            Celebre a vida dos irmãos da comunidade deixando um recado no mural ou pelo WhatsApp!
+            Celebre a vida de cada integrante da paróquia (incluindo cada irmão de contas familiares) deixando um recado!
           </p>
         </div>
 
@@ -113,7 +127,7 @@ export function renderBirthdays(container, { user }) {
               .map((b) => {
                 const wa = cleanPhoneForWhatsApp(b.phone);
                 const msg = encodeURIComponent(
-                  `Paz e bem, ${b.name}! Parabéns pelo seu aniversário! Que Deus e Santa Teresa d'Ávila abençoem sempre sua vida e sua missão!`,
+                  `Paz e bem! Parabéns pelo aniversário de ${b.name}! Que Deus e Santa Teresa d'Ávila abençoem sempre sua vida e missão!`,
                 );
                 const pNames = getUserMemberships(b)
                   .map((m) => pastoralMap[m.pastoralId]?.shortName)
@@ -132,7 +146,7 @@ export function renderBirthdays(container, { user }) {
                       </div>
                     </div>
                     <div class="flex items-center gap-2 shrink-0">
-                      <button type="button" data-congrats-uid="${b.id}"
+                      <button type="button" data-congrats-mid="${b.id}"
                         class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-[#2B1B18] text-xs font-extrabold transition">
                         <i data-lucide="heart" class="w-3.5 h-3.5"></i>
                         Deixar Parabéns
@@ -176,7 +190,7 @@ export function renderBirthdays(container, { user }) {
               .map((b) => {
                 const wa = cleanPhoneForWhatsApp(b.phone);
                 const msg = encodeURIComponent(
-                  `Paz e bem, ${b.name}! Feliz aniversário! Deus abençoe muito sua caminhada na Paróquia Santa Teresa d'Ávila!`,
+                  `Paz e bem! Feliz aniversário para ${b.name}! Deus abençoe muito sua caminhada na Paróquia Santa Teresa d'Ávila!`,
                 );
                 const mems = getUserMemberships(b);
                 return `
@@ -192,7 +206,17 @@ export function renderBirthdays(container, { user }) {
                             ${escapeHtml(getInitials(b.name))}
                           </div>
                           <div class="min-w-0">
-                            <h5 class="font-extrabold text-[#3E2723] truncate">${escapeHtml(b.name)}</h5>
+                            <div class="flex items-center gap-1.5 flex-wrap">
+                              <h5 class="font-extrabold text-[#3E2723] truncate">${escapeHtml(b.name)}</h5>
+                              ${
+                                b.isFamily
+                                  ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-[#78350F] border border-amber-300">
+                                      <i data-lucide="users" class="w-3 h-3"></i>
+                                      Conta Familiar
+                                    </span>`
+                                  : ''
+                              }
+                            </div>
                             <div class="flex items-center gap-1 flex-wrap mt-1">
                               ${
                                 b.isGeneralAdmin
@@ -248,7 +272,7 @@ export function renderBirthdays(container, { user }) {
                     </div>
 
                     <div class="pt-3 border-t border-[#E6DACE]/70 flex items-center justify-between gap-2 flex-wrap">
-                      <button type="button" data-congrats-uid="${b.id}"
+                      <button type="button" data-congrats-mid="${b.id}"
                         class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#3E2723] hover:bg-[#5D4037] text-white text-xs font-bold transition">
                         <i data-lucide="heart" class="w-3.5 h-3.5 text-amber-400"></i>
                         Deixar Parabéns
@@ -258,7 +282,7 @@ export function renderBirthdays(container, { user }) {
                           ? `<a href="https://wa.me/${wa}?text=${msg}" target="_blank" rel="noopener noreferrer"
                               class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold transition">
                               <i data-lucide="message-circle" class="w-3.5 h-3.5"></i>
-                              WhatsApp
+                              WhatsApp${b.isFamily ? ' (Resp.)' : ''}
                             </a>`
                           : ''
                       }
@@ -284,9 +308,9 @@ export function renderBirthdays(container, { user }) {
     renderBirthdays(container, { user });
   });
 
-  container.querySelectorAll('[data-congrats-uid]').forEach((btn) => {
+  container.querySelectorAll('[data-congrats-mid]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const recipient = dataService.getUserById(btn.dataset.congratsUid);
+      const recipient = birthdaysInMonth.find((b) => b.id === btn.dataset.congratsMid);
       if (recipient) {
         openCongratsModal(recipient, user, pastoralMap, () => renderBirthdays(container, { user }));
       }
