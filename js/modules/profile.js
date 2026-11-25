@@ -8,6 +8,7 @@
  */
 
 import { dataService } from '../services/dataService.js';
+import { authService } from '../services/authService.js';
 import {
   closeModal,
   escapeHtml,
@@ -296,7 +297,7 @@ export function openMyProfileModal(user, { onProfileUpdated } = {}) {
         }
       });
 
-      passwordForm.addEventListener('submit', (e) => {
+      passwordForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const fd = new FormData(e.target);
         const currentPassword = String(fd.get('currentPassword'));
@@ -314,7 +315,12 @@ export function openMyProfileModal(user, { onProfileUpdated } = {}) {
           return;
         }
 
-        const result = dataService.updateOwnPassword(freshUser.id, currentPassword, newPassword);
+        const submitBtn = passwordForm.querySelector('button[type="submit"]');
+        if (submitBtn) submitBtn.disabled = true;
+
+        const result = await authService.updatePasswordForUser(freshUser, currentPassword, newPassword);
+        if (submitBtn) submitBtn.disabled = false;
+
         if (!result.ok) {
           passErr.textContent = result.error;
           passErr.classList.remove('hidden');
@@ -323,7 +329,7 @@ export function openMyProfileModal(user, { onProfileUpdated } = {}) {
 
         passErr.classList.add('hidden');
         closeModal();
-        showToast('Senha alterada com sucesso!');
+        showToast('Senha atualizada com sucesso no Firebase!');
         onProfileUpdated?.(result.user);
       });
     },

@@ -7,6 +7,7 @@
  */
 
 import { dataService } from './services/dataService.js';
+import { authService } from './services/authService.js';
 import {
   closeModal,
   escapeHtml,
@@ -182,11 +183,57 @@ function describeUserScope(u, pastoralMap) {
   return members.length ? `Membro: ${members.join(', ')}${famNote}` : `Membro${famNote}`;
 }
 
-function init() {
-  dataService.init();
+function handleRealtimeFirestoreSync() {
+  if (!currentUser) {
+    // Atualiza perfis na tela de login se ela estiver aberta
+    if (!document.getElementById('login-screen')?.classList.contains('hidden')) {
+      showLoginScreen();
+    }
+    return;
+  }
+
+  const fresh = dataService.getUserById(currentUser.id);
+  if (fresh) currentUser = fresh;
+
+  renderHeader();
+  renderNotificationsBell();
+  renderSidebar();
+
+  // Não interrompe digitação ou modal aberto ao receber atualização remota em tempo real
+  const modalOpen = !document.getElementById('modal-root')?.classList.contains('hidden');
+  const activeTag = document.activeElement?.tagName;
+  const isTyping = activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT';
+  if (!modalOpen && !isTyping) {
+    renderCurrentRoute();
+  }
+}
+
+async function init() {
   registerServiceWorker();
   setupPwaInstall();
   bindGlobalEvents();
+
+  const bootEl = document.getElementById('firebase-boot-screen');
+  const bootMsg = document.getElementById('firebase-boot-message');
+
+  try {
+    if (bootMsg) bootMsg.textContent = 'Conectando ao Cloud Firestore em tempo real...';
+    await dataService.init(handleRealtimeFirestoreSync);
+  } catch (err) {
+    console.warn('[Firebase] Falha na inicialização:', err?.message || err);
+    if (bootMsg) bootMsg.textContent = 'Erro ao conectar ao Firebase. Recarregue a página.';
+  }
+
+  if (bootEl) bootEl.classList.add('hidden');
+
+  const syncEl = document.getElementById('firebase-sync-status');
+  const status = dataService.getSyncStatus();
+  if (syncEl && status.connected) {
+    syncEl.innerHTML = `
+      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
+      <span class="text-[10px] font-bold tracking-wide text-emerald-300 truncate">Cloud Firestore • Tempo Real</span>
+    `;
+  }
 
   const savedUserId = dataService.getSessionUserId();
   const savedUser = savedUserId ? dataService.getUserById(savedUserId) : null;
@@ -379,9 +426,9 @@ function bindGlobalEvents() {
     });
   });
 
-  document.getElementById('logout-btn')?.addEventListener('click', () => {
+  document.getElementById('logout-btn')?.addEventListener('click', async () => {
     closeNotificationsPopover();
-    dataService.setSessionUserId(null);
+    await authService.logout();
     currentUser = null;
     showLoginScreen();
     showToast('Você saiu do portal.', 'info');
@@ -396,32 +443,25 @@ function bindGlobalEvents() {
     loginAs(target, { silent: false });
   });
 
-  document.getElementById('login-form')?.addEventListener('submit', (e) => {
+  document.getElementById('login-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = document.getElementById('login-email').value.trim().toLowerCase();
     const password = document.getElementById('login-password').value;
     const errorEl = document.getElementById('login-error');
-    const found = dataService.getUsers().find((u) => u.email.toLowerCase() === email);
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
 
-    if (!found) {
-      errorEl.textContent = 'E-mail não encontrado. Utilize um dos perfis de demonstração abaixo ou cadastre o membro.';
-      errorEl.classList.remove('hidden');
-      return;
-    }
-    if (found.status !== 'Ativo') {
-      errorEl.textContent = `Acesso indisponível: este usuário está com status "${found.status}".`;
-      errorEl.classList.remove('hidden');
-      return;
-    }
-    const expectedPass = found.password || 'pastoral2026';
-    if (password !== expectedPass) {
-      errorEl.textContent = 'Senha incorreta. (Dica de demonstração: pastoral2026 ou sua nova senha alterada em Meu Perfil).';
+    const result = await authService.loginWithCredentials(email, password);
+    if (submitBtn) submitBtn.disabled = false;
+
+    if (!result.ok) {
+      errorEl.textContent = result.error;
       errorEl.classList.remove('hidden');
       return;
     }
 
     errorEl.classList.add('hidden');
-    loginAs(found);
+    loginAs(result.user);
   });
 }
 
@@ -490,6 +530,7 @@ function getFallbackAllowedRoute(user, permissions) {
 function loginAs(user, { silent = false } = {}) {
   currentUser = user;
   dataService.setSessionUserId(user.id);
+  authService.syncDemoProfileSession(user);
 
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app-shell').classList.remove('hidden');

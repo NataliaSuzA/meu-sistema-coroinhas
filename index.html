@@ -65,6 +65,18 @@
 </head>
 <body class="bg-[#FAF6F0] text-[#3E2723] font-sans antialiased selection:bg-amber-200 selection:text-[#2B1B18]">
 
+  <!-- Splash de Conexão Inicial ao Cloud Firestore -->
+  <div id="firebase-boot-screen" class="fixed inset-0 z-[70] bg-[#3E2723] text-white flex flex-col items-center justify-center p-6 text-center">
+    <div class="w-16 h-16 rounded-2xl bg-amber-500/15 border border-amber-400/40 text-amber-400 flex items-center justify-center mb-4 animate-pulse shadow-lg">
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M16 4V28M9 11.5H23" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
+        <circle cx="16" cy="11.5" r="5" stroke="currentColor" stroke-width="1.5" stroke-opacity="0.6"/>
+      </svg>
+    </div>
+    <h1 class="font-serif text-xl font-bold tracking-wide text-white">Paróquia Santa Teresa d'Ávila</h1>
+    <p id="firebase-boot-message" class="text-xs text-amber-200/90 mt-2">Conectando ao Cloud Firestore em tempo real...</p>
+  </div>
+
   <!-- Tela de Login -->
   <div id="login-screen" class="hidden min-h-screen bg-[#3E2723] relative overflow-hidden flex items-center justify-center p-4 sm:p-6">
     <!-- Fundo decorativo carmelita -->
@@ -204,14 +216,18 @@
       </div>
 
       <!-- Rodapé da Sidebar -->
-      <div class="px-5 py-3.5 border-t border-white/10 bg-[#2B1B18]/80">
+      <div class="px-5 py-3.5 border-t border-white/10 bg-[#2B1B18]/80 space-y-1.5">
         <div class="flex items-center gap-2.5">
           <span class="w-2 h-2 rounded-full bg-amber-500 shrink-0"></span>
           <p class="text-[11px] font-bold tracking-[0.12em] text-amber-300 uppercase leading-tight">
             Sistema Multi-Pastoral
           </p>
         </div>
-        <p class="text-[10px] text-amber-100/50 mt-1 pl-4">Paróquia Santa Teresa d'Ávila</p>
+        <div id="firebase-sync-status" class="flex items-center gap-2 pl-4">
+          <span class="w-2 h-2 rounded-full bg-amber-400 shrink-0"></span>
+          <span class="text-[10px] font-semibold text-amber-100/70">Conectando ao Firestore...</span>
+        </div>
+        <p class="text-[10px] text-amber-100/50 pl-4">Paróquia Santa Teresa d'Ávila</p>
       </div>
     </aside>
 

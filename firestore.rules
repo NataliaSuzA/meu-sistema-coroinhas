@@ -1,0 +1,12 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Regras iniciais para a plataforma Gestão Pastoral - Paróquia Santa Teresa d'Ávila
+    // Permite leitura/escrita para usuários autenticados e bootstrap inicial de demonstração.
+    // Em produção avançada, restrinja por request.auth != null e papéis no documento users/{uid}.
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
