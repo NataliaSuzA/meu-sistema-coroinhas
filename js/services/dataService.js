@@ -27,6 +27,7 @@ function normalizeFamilyMembers(user) {
       id: m.id || (idx === 0 && user.id ? user.id : genId('mem')),
       name: String(m.name || user.name || '').trim(),
       birthDate: m.birthDate || user.birthDate || '',
+      pastoralId: m.pastoralId || '',
     }));
   }
   return [
@@ -34,6 +35,7 @@ function normalizeFamilyMembers(user) {
       id: user.id || genId('mem'),
       name: String(user.name || '').trim(),
       birthDate: user.birthDate || '',
+      pastoralId: '',
     },
   ];
 }
@@ -221,18 +223,22 @@ export const dataService = {
     accounts.forEach((acc) => {
       const members = normalizeFamilyMembers(acc);
       members.forEach((m) => {
+        // Em contas familiares inter-pastorais, cada irmão aparece apenas na sua própria pastoral
+        if (m.pastoralId && m.pastoralId !== pastoralId) return;
         participants.push({
           accountId: acc.id,
           memberId: m.id,
           name: m.name,
           birthDate: m.birthDate,
+          pastoralId: m.pastoralId || pastoralId,
           isFamily: members.length > 1,
+          siblings: members.filter((x) => x.id !== m.id),
           accountName: acc.name,
           account: acc,
         });
       });
     });
-    return participants;
+    return participants.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
   },
 
   saveUser(user) {

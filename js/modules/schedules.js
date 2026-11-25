@@ -25,6 +25,7 @@ import {
   getCoordinatedPastoralIds,
   getCountdownBadge,
   getFirstName,
+  getLinkedSiblingsInfo,
   getMemberPastoralIds,
   getOpenSubstitutionsForUser,
   getTodayISO,
@@ -274,6 +275,7 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
               pastoralMap,
               ctMap,
               slotIndex,
+              allSchedules: schedules,
             }),
           )
           .join('')}
@@ -350,7 +352,7 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
   refreshIcons();
 }
 
-function renderScheduleCard(sch, { user, canCreateEdit, accessiblePastoralSet, userMap, roleMap, pastoralMap, ctMap, slotIndex }) {
+function renderScheduleCard(sch, { user, canCreateEdit, accessiblePastoralSet, userMap, roleMap, pastoralMap, ctMap, slotIndex, allSchedules = [] }) {
   const myAssignmentsHere = (sch.assignments || []).filter((a) => a.userId === user.id);
   const isUserAssigned = myAssignmentsHere.length > 0;
   const canEdit = canCreateEdit && canManageSchedule(user, sch);
@@ -363,6 +365,14 @@ function renderScheduleCard(sch, { user, canCreateEdit, accessiblePastoralSet, u
   const userHasConflictHere = myAssignmentsHere.some((a) =>
     hasTimeConflict(slotIndex, a.memberId || a.userId, sch.date, sch.time),
   );
+
+  // Integrantes escalados nesta mesma data/horário (na mesma escala ou em escala paralela de outra pastoral)
+  const sameSlotMemberIds = new Set();
+  (allSchedules.length ? allSchedules : [sch]).forEach((s) => {
+    if (s.date === sch.date && s.time === sch.time) {
+      (s.assignments || []).forEach((a) => sameSlotMemberIds.add(a.memberId || a.userId));
+    }
+  });
 
   return `
     <article class="bg-white rounded-2xl border-2 ${
@@ -459,6 +469,9 @@ function renderScheduleCard(sch, { user, canCreateEdit, accessiblePastoralSet, u
               const memberAccount = userMap[asg.userId];
               const assignedName = resolveAssignedMemberName(userMap, asg.userId, asg.memberId);
               const isFamAcc = isFamilyAccount(memberAccount);
+              const linkedSiblings = isFamAcc
+                ? getLinkedSiblingsInfo(userMap, asg.userId, asg.memberId, pastoralMap)
+                : [];
               const role = roleMap[asg.roleId];
               const asgPastoralId = asg.pastoralId || sch.pastoralId;
               const asgPastoral = pastoralMap[asgPastoralId] || mainPastoral;
@@ -493,6 +506,27 @@ function renderScheduleCard(sch, { user, canCreateEdit, accessiblePastoralSet, u
                         ${isMine ? '<span class="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-200 text-[#78350F]">Você</span>' : ''}
                         ${isFamAcc ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100/80 text-[#78350F] border border-amber-300">Conta Familiar</span>' : ''}
                       </p>
+                      ${
+                        linkedSiblings.length > 0
+                          ? `<div class="flex items-center gap-1.5 flex-wrap pt-0.5">
+                              ${linkedSiblings
+                                .map((sib) => {
+                                  const together = sameSlotMemberIds.has(sib.id);
+                                  const pSuffix = sib.pastoralShortName ? ` • ${escapeHtml(sib.pastoralShortName)}` : '';
+                                  return together
+                                    ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                        <i data-lucide="users" class="w-3 h-3"></i>
+                                        Irmão(ã) nesta missa: ${escapeHtml(sib.name)}${pSuffix}
+                                      </span>`
+                                    : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50/90 text-[#78350F] border border-amber-200">
+                                        <i data-lucide="users" class="w-3 h-3 text-[#B45309]"></i>
+                                        Irmão(ã): ${escapeHtml(sib.name)}${pSuffix}
+                                      </span>`;
+                                })
+                                .join('')}
+                            </div>`
+                          : ''
+                      }
                       ${
                         asg.substitutionAccepted && asg.substitutedFromName
                           ? `<p class="text-[11px] font-semibold text-emerald-800 flex items-center gap-1">
@@ -894,25 +928,171 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
         }
       }
 
+      function collectSameCelebrationSelected() {
+        const date = dateInput.value;
+        const time = timeInput.value;
+        // Mapa: memberId -> { accountId, memberId, name }
+        const selectedByMemberId = new Map();
+
+        // 1. Seleções atuais no formulário desta escala
+        listEl.querySelectorAll('.position-row').forEach((row) => {
+          const val = row.querySelector('.pos-user')?.value;
+          if (!val) return;
+          const [accountId, memberId] = val.split('::');
+          const mId = memberId || accountId;
+          selectedByMemberId.set(mId, {
+            accountId,
+            memberId: mId,
+            name: resolveAssignedMemberName(userMap, accountId, mId),
+          });
+        });
+
+        // 2. Escalas já salvas em outra pastoral no mesmo dia e horário
+        if (date && time) {
+          allSchedules.forEach((s) => {
+            if (existing?.id && s.id === existing.id) return;
+            if (s.date !== date || s.time !== time) return;
+            (s.assignments || []).forEach((a) => {
+              const mId = a.memberId || a.userId;
+              if (!selectedByMemberId.has(mId)) {
+                selectedByMemberId.set(mId, {
+                  accountId: a.userId,
+                  memberId: mId,
+                  name: resolveAssignedMemberName(userMap, a.userId, mId),
+                });
+              }
+            });
+          });
+        }
+
+        return selectedByMemberId;
+      }
+
+      function populateUserSelect(row, pastoralId, currentVal = '', sameCelebrationMap = new Map()) {
+        const userSel = row.querySelector('.pos-user');
+        const participants = dataService.getActiveParticipantsByPastoral(pastoralId);
+
+        const highlighted = [];
+        const regular = [];
+
+        participants.forEach((p) => {
+          const val = `${p.accountId}::${p.memberId}`;
+          const siblingMatches = (p.siblings || [])
+            .filter((sib) => sameCelebrationMap.has(sib.id))
+            .map((sib) => sib.name);
+
+          if (siblingMatches.length > 0) {
+            highlighted.push({ p, val, siblingMatches });
+          } else {
+            regular.push({ p, val });
+          }
+        });
+
+        const buildOpt = ({ p, val, siblingMatches = [] }) => {
+          const selected =
+            val === currentVal ||
+            (currentVal && !currentVal.includes('::') && p.accountId === currentVal);
+          const label =
+            siblingMatches.length > 0
+              ? `★ ${p.name} (Irmão/ã de ${siblingMatches.join(', ')} nesta missa)`
+              : `${p.name}${p.isFamily ? ' (Conta Familiar)' : ''}`;
+          return `<option value="${val}" ${selected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+        };
+
+        let optionsHtml = '<option value="">3. Integrante ativo...</option>';
+        if (highlighted.length > 0) {
+          optionsHtml += `<optgroup label="★ Irmãos já escalados nesta celebração">${highlighted.map(buildOpt).join('')}</optgroup>`;
+          optionsHtml += `<optgroup label="Demais integrantes da pastoral">${regular.map(buildOpt).join('')}</optgroup>`;
+        } else {
+          optionsHtml += regular.map(buildOpt).join('');
+        }
+        userSel.innerHTML = optionsHtml;
+      }
+
+      function refreshSiblingReconciliation() {
+        const sameCelebrationMap = collectSameCelebrationSelected();
+
+        listEl.querySelectorAll('.position-row').forEach((row) => {
+          const pastoralId = row.querySelector('.pos-pastoral').value;
+          const userSel = row.querySelector('.pos-user');
+          const currentVal = userSel.value;
+
+          // Atualiza destaque no dropdown preservando o valor selecionado
+          populateUserSelect(row, pastoralId, currentVal, sameCelebrationMap);
+
+          // Atualiza a etiqueta discreta de irmãos vinculados abaixo da linha
+          const hintEl = row.querySelector('.pos-sibling-hint');
+          if (!hintEl) return;
+
+          if (!currentVal) {
+            hintEl.innerHTML = '';
+            hintEl.classList.add('hidden');
+            return;
+          }
+
+          const [accountId, memberId] = currentVal.split('::');
+          const siblings = getLinkedSiblingsInfo(userMap, accountId, memberId, pastoralMap);
+
+          if (siblings.length === 0) {
+            hintEl.innerHTML = '';
+            hintEl.classList.add('hidden');
+            return;
+          }
+
+          hintEl.classList.remove('hidden');
+          hintEl.innerHTML = `
+            <div class="flex items-center gap-1.5 flex-wrap pt-1.5">
+              ${siblings
+                .map((sib) => {
+                  const alreadyInMass = sameCelebrationMap.has(sib.id);
+                  const pSuffix = sib.pastoralShortName ? ` • ${escapeHtml(sib.pastoralShortName)}` : '';
+                  const canQuickAdd = !alreadyInMass && sib.pastoralId && managedIds.has(sib.pastoralId);
+                  return `
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border ${
+                      alreadyInMass
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                        : 'bg-amber-50 text-[#78350F] border-amber-300'
+                    }">
+                      <i data-lucide="users" class="w-3 h-3"></i>
+                      ${alreadyInMass ? '✓ Irmão(ã) nesta celebração:' : 'Irmão(ã):'} ${escapeHtml(sib.name)}${pSuffix}
+                    </span>
+                    ${
+                      canQuickAdd
+                        ? `<button type="button" data-quick-add-sib-acc="${sib.accountId}" data-quick-add-sib-mid="${sib.id}" data-quick-add-sib-pid="${sib.pastoralId}"
+                            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#3E2723] hover:bg-[#5D4037] text-amber-300 transition">
+                            + Escalar ${escapeHtml(sib.name)}
+                          </button>`
+                        : ''
+                    }
+                  `;
+                })
+                .join('')}
+            </div>
+          `;
+
+          hintEl.querySelectorAll('[data-quick-add-sib-mid]').forEach((qBtn) => {
+            qBtn.addEventListener('click', () => {
+              addPositionRow({
+                pastoralId: qBtn.dataset.quickAddSibPid,
+                userId: qBtn.dataset.quickAddSibAcc,
+                memberId: qBtn.dataset.quickAddSibMid,
+              });
+            });
+          });
+        });
+
+        refreshIcons();
+      }
+
       function populateRolesAndMembers(row, pastoralId, presetRoleId = '', presetUserId = '', presetMemberId = '') {
         const activeRoles = dataService.getActiveRolesByPastoral(pastoralId);
-        const participants = dataService.getActiveParticipantsByPastoral(pastoralId);
         const targetKey = presetUserId ? `${presetUserId}::${presetMemberId || presetUserId}` : '';
 
         row.querySelector('.pos-role').innerHTML = `
           <option value="">2. Função ativa...</option>
           ${activeRoles.map((r) => `<option value="${r.id}" ${presetRoleId === r.id ? 'selected' : ''}>${escapeHtml(r.name)}</option>`).join('')}
         `;
-        row.querySelector('.pos-user').innerHTML = `
-          <option value="">3. Integrante ativo...</option>
-          ${participants
-            .map((p) => {
-              const val = `${p.accountId}::${p.memberId}`;
-              const selected = val === targetKey || (!presetMemberId && p.accountId === presetUserId);
-              return `<option value="${val}" ${selected ? 'selected' : ''}>${escapeHtml(p.name)}${p.isFamily ? ' (Conta Familiar)' : ''}</option>`;
-            })
-            .join('')}
-        `;
+        populateUserSelect(row, pastoralId, targetKey, collectSameCelebrationSelected());
       }
 
       function addPositionRow(preset = null) {
@@ -924,7 +1104,7 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
               : managedPastorals[0].id;
 
         const row = document.createElement('div');
-        row.className = 'position-row grid grid-cols-1 sm:grid-cols-12 gap-2 items-center bg-[#FAF6F0] p-2.5 rounded-xl border border-[#E6DACE]';
+        row.className = 'position-row bg-[#FAF6F0] p-2.5 rounded-xl border border-[#E6DACE]';
         row.dataset.asgId = preset?.id || '';
         row.dataset.subReq = preset?.substitutionRequested ? '1' : '0';
         row.dataset.subReason = preset?.substitutionReason || '';
@@ -933,38 +1113,46 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
         row.dataset.subAt = preset?.substitutedAt || '';
 
         row.innerHTML = `
-          <div class="sm:col-span-4">
-            <select class="pos-pastoral w-full px-2.5 py-2 rounded-lg border border-[#E6DACE] bg-white text-xs font-semibold text-[#3E2723] outline-none focus:border-[#B45309]" required>
-              ${managedPastorals.map((p) => `<option value="${p.id}" ${rowPastoralId === p.id ? 'selected' : ''}>${escapeHtml(p.shortName)}</option>`).join('')}
-            </select>
+          <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+            <div class="sm:col-span-4">
+              <select class="pos-pastoral w-full px-2.5 py-2 rounded-lg border border-[#E6DACE] bg-white text-xs font-semibold text-[#3E2723] outline-none focus:border-[#B45309]" required>
+                ${managedPastorals.map((p) => `<option value="${p.id}" ${rowPastoralId === p.id ? 'selected' : ''}>${escapeHtml(p.shortName)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="sm:col-span-3">
+              <select class="pos-role w-full px-2.5 py-2 rounded-lg border border-[#E6DACE] bg-white text-xs font-medium outline-none focus:border-[#B45309]" required></select>
+            </div>
+            <div class="sm:col-span-4">
+              <select class="pos-user w-full px-2.5 py-2 rounded-lg border border-[#E6DACE] bg-white text-xs font-medium outline-none focus:border-[#B45309]" required></select>
+            </div>
+            <div class="sm:col-span-1 flex justify-end">
+              <button type="button" class="remove-pos-btn p-1.5 rounded-lg text-[#8D6E63] hover:text-red-700 hover:bg-red-50 transition">
+                <i data-lucide="trash-2" class="w-4 h-4"></i>
+              </button>
+            </div>
           </div>
-          <div class="sm:col-span-3">
-            <select class="pos-role w-full px-2.5 py-2 rounded-lg border border-[#E6DACE] bg-white text-xs font-medium outline-none focus:border-[#B45309]" required></select>
-          </div>
-          <div class="sm:col-span-4">
-            <select class="pos-user w-full px-2.5 py-2 rounded-lg border border-[#E6DACE] bg-white text-xs font-medium outline-none focus:border-[#B45309]" required></select>
-          </div>
-          <div class="sm:col-span-1 flex justify-end">
-            <button type="button" class="remove-pos-btn p-1.5 rounded-lg text-[#8D6E63] hover:text-red-700 hover:bg-red-50 transition">
-              <i data-lucide="trash-2" class="w-4 h-4"></i>
-            </button>
-          </div>
+          <div class="pos-sibling-hint hidden"></div>
         `;
 
         populateRolesAndMembers(row, rowPastoralId, preset?.roleId || '', preset?.userId || '', preset?.memberId || '');
         row.querySelector('.pos-pastoral').addEventListener('change', (e) => {
           populateRolesAndMembers(row, e.target.value);
           updateConflictWarnings();
+          refreshSiblingReconciliation();
         });
-        row.querySelector('.pos-user').addEventListener('change', updateConflictWarnings);
+        row.querySelector('.pos-user').addEventListener('change', () => {
+          updateConflictWarnings();
+          refreshSiblingReconciliation();
+        });
         row.querySelector('.remove-pos-btn').addEventListener('click', () => {
           row.remove();
           updateConflictWarnings();
+          refreshSiblingReconciliation();
         });
 
         listEl.appendChild(row);
-        refreshIcons();
         updateConflictWarnings();
+        refreshSiblingReconciliation();
       }
 
       if (existing?.assignments?.length) {
@@ -976,8 +1164,12 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
       dateInput.addEventListener('change', () => {
         syncLiturgyForDate(dateInput.value, true);
         updateConflictWarnings();
+        refreshSiblingReconciliation();
       });
-      timeInput.addEventListener('change', updateConflictWarnings);
+      timeInput.addEventListener('change', () => {
+        updateConflictWarnings();
+        refreshSiblingReconciliation();
+      });
       bodyEl.querySelector('#btn-add-position-row').addEventListener('click', () => addPositionRow());
       bodyEl.querySelector('#cancel-modal-btn').addEventListener('click', closeModal);
 

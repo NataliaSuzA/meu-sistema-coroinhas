@@ -111,11 +111,17 @@ function sanitizeForFirestore(value) {
 function normalizeFromFirestore(colName, docId, data) {
   const item = { ...data, id: data.id || docId };
   if (colName === COLLECTIONS.USERS) {
-    const members = Array.isArray(item.integrantes) && item.integrantes.length > 0
+    const rawMembers = Array.isArray(item.integrantes) && item.integrantes.length > 0
       ? item.integrantes
       : Array.isArray(item.familyMembers) && item.familyMembers.length > 0
         ? item.familyMembers
-        : [{ id: item.id, name: item.name || '', birthDate: item.birthDate || '' }];
+        : [{ id: item.id, name: item.name || '', birthDate: item.birthDate || '', pastoralId: '' }];
+    const members = rawMembers.map((m) => ({
+      id: m.id || item.id,
+      name: m.name || item.name || '',
+      birthDate: m.birthDate || '',
+      pastoralId: m.pastoralId || '',
+    }));
     item.integrantes = members;
     item.familyMembers = members;
   } else if (colName === COLLECTIONS.SCHEDULES) {

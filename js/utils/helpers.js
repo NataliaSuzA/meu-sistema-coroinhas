@@ -56,6 +56,32 @@ export function resolveAssignedMemberName(userMap, userId, memberId) {
   return target?.name || acc.name;
 }
 
+/**
+ * Retorna os irmãos vinculados na mesma Conta Familiar de um integrante,
+ * junto com a pastoral específica de cada irmão (para apoio à conciliação em escalas).
+ */
+export function getLinkedSiblingsInfo(userMap, accountId, memberId, pastoralMap = {}) {
+  const acc = userMap[accountId];
+  if (!acc) return [];
+  const members = getAccountMembers(acc);
+  if (members.length <= 1) return [];
+  const accDefaultPid = getUserMemberships(acc)[0]?.pastoralId || '';
+  return members
+    .filter((m) => m.id !== (memberId || members[0].id))
+    .map((sib) => {
+      const pid = sib.pastoralId || accDefaultPid;
+      const p = pastoralMap[pid];
+      return {
+        id: sib.id,
+        accountId: acc.id,
+        name: sib.name,
+        pastoralId: pid,
+        pastoralShortName: p?.shortName || p?.name || '',
+        pastoralColor: p?.color || '#B45309',
+      };
+    });
+}
+
 export function getOpenSubstitutionsForUser(user, schedules, pastorals) {
   if (!user) return [];
   const todayISO = getTodayISO();

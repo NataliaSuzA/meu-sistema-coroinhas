@@ -169,7 +169,14 @@ function setupPwaInstall() {
 
 function getDemoProfiles() {
   const users = dataService.getUsers();
-  const preferredIds = ['usr_admin', 'usr_natalia', 'usr_carlos', 'usr_familia_silva', 'usr_gabriel', 'usr_lucas'];
+  const preferredIds = [
+    'usr_natalia_admin',
+    'usr_fam_alice_marina',
+    'usr_fam_lara_victoriaa',
+    'usr_fam_rafaelp_miguel',
+    'usr_cor_malu1',
+    'usr_aco_milena',
+  ];
   const list = preferredIds.map((id) => users.find((u) => u.id === id)).filter(Boolean);
   if (list.length > 0) return list;
   return users.filter((u) => u.status === 'Ativo').slice(0, 6);
@@ -620,17 +627,23 @@ function renderHeader() {
 
   if (showSwitcher && switcher) {
     const activeUsers = dataService.getUsers().filter((u) => u.status === 'Ativo');
-    const demoOrder = ['usr_admin', 'usr_natalia', 'usr_carlos', 'usr_familia_silva', 'usr_gabriel', 'usr_lucas', 'usr_joao'];
+    const demoOrder = [
+      'usr_natalia_admin',
+      'usr_fam_alice_marina',
+      'usr_fam_lara_victoriaa',
+      'usr_fam_rafaelp_miguel',
+      'usr_fam_olivia_helena1',
+    ];
     const demoSet = new Set(demoOrder);
     const sorted = [
       ...demoOrder.map((id) => activeUsers.find((u) => u.id === id)).filter(Boolean),
-      ...activeUsers.filter((u) => !demoSet.has(u.id)),
+      ...activeUsers.filter((u) => !demoSet.has(u.id)).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
     ];
 
     switcher.innerHTML = sorted
       .map((u) => {
         const scope = describeUserScope(u, pastoralMap);
-        const displayName = isFamilyAccount(u) ? u.name.split('(')[0].trim() : u.name.split(' ')[0];
+        const displayName = isFamilyAccount(u) ? u.name : u.name;
         const shortLabel = `${displayName} — ${scope}`;
         return `<option value="${u.id}" ${u.id === currentUser.id ? 'selected' : ''}>${escapeHtml(shortLabel)}</option>`;
       })

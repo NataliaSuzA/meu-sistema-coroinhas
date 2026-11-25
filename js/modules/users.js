@@ -148,13 +148,17 @@ export function renderUsers(container, { user, onUsersChanged }) {
                                     isFam
                                       ? `<div class="mt-1.5 flex flex-wrap gap-1">
                                           ${members
-                                            .map(
-                                              (m) => `
-                                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#FAF6F0] border border-[#E6DACE] text-[10px] font-semibold text-[#4E342E]">
-                                              ${escapeHtml(m.name)} <span class="text-[#8D6E63]">(${escapeHtml(formatDateBR(m.birthDate))})</span>
-                                            </span>
-                                          `,
-                                            )
+                                            .map((m) => {
+                                              const pTag = m.pastoralId && pastoralMap[m.pastoralId]
+                                                ? ` • <span style="color:${escapeHtml(pastoralMap[m.pastoralId].color)}">${escapeHtml(pastoralMap[m.pastoralId].shortName)}</span>`
+                                                : '';
+                                              const bTag = m.birthDate ? ` <span class="text-[#8D6E63]">(${escapeHtml(formatDateBR(m.birthDate))})</span>` : '';
+                                              return `
+                                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#FAF6F0] border border-[#E6DACE] text-[10px] font-semibold text-[#4E342E]">
+                                                  ${escapeHtml(m.name)}${pTag}${bTag}
+                                                </span>
+                                              `;
+                                            })
                                             .join('')}
                                         </div>`
                                       : ''
@@ -312,8 +316,8 @@ function openUserModal(existing, actor, onSaved) {
                 class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm focus:border-[#B45309] outline-none">
             </div>
             <div>
-              <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Telefone / WhatsApp (Responsável) *</label>
-              <input name="phone" required value="${escapeHtml(existing?.phone || '')}" placeholder="(11) 99999-0000"
+              <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Telefone / WhatsApp (Responsável)</label>
+              <input name="phone" value="${escapeHtml(existing?.phone || '')}" placeholder="(11) 99999-0000"
                 class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm focus:border-[#B45309] outline-none">
             </div>
           </div>
@@ -446,7 +450,7 @@ function openUserModal(existing, actor, onSaved) {
         });
       }
 
-      function addFamilyMemberRow(preset = { id: '', name: '', birthDate: '' }) {
+      function addFamilyMemberRow(preset = { id: '', name: '', birthDate: '', pastoralId: '' }) {
         const row = document.createElement('div');
         row.className = 'family-member-row p-3 rounded-xl bg-white border border-[#E6DACE] space-y-2';
         row.dataset.memberId = preset.id || '';
@@ -459,15 +463,24 @@ function openUserModal(existing, actor, onSaved) {
             </button>
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-            <div class="sm:col-span-7">
+            <div class="sm:col-span-5">
               <label class="block text-[11px] font-bold text-[#5D4037] mb-1">Nome Completo / de Exibição *</label>
               <input type="text" required class="fm-name w-full px-3 py-2 rounded-lg border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none"
-                placeholder="Ex: Pedro Lucas Silva" value="${escapeHtml(preset.name || '')}">
+                placeholder="Ex: Alice" value="${escapeHtml(preset.name || '')}">
             </div>
-            <div class="sm:col-span-5">
-              <label class="block text-[11px] font-bold text-[#5D4037] mb-1">Data de Nascimento *</label>
-              <input type="date" required class="fm-birth w-full px-3 py-2 rounded-lg border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none"
+            <div class="sm:col-span-3">
+              <label class="block text-[11px] font-bold text-[#5D4037] mb-1">Nascimento</label>
+              <input type="date" class="fm-birth w-full px-2.5 py-2 rounded-lg border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none"
                 value="${escapeHtml(preset.birthDate || '')}">
+            </div>
+            <div class="sm:col-span-4">
+              <label class="block text-[11px] font-bold text-[#5D4037] mb-1">Pastoral do Integrante</label>
+              <select class="fm-pastoral w-full px-2.5 py-2 rounded-lg border border-[#E6DACE] bg-white text-xs font-semibold text-[#3E2723] outline-none focus:border-[#B45309]">
+                <option value="" ${!preset.pastoralId ? 'selected' : ''}>Todas da conta</option>
+                ${pastorals
+                  .map((p) => `<option value="${p.id}" ${preset.pastoralId === p.id ? 'selected' : ''}>${escapeHtml(p.shortName)}</option>`)
+                  .join('')}
+              </select>
             </div>
           </div>
         `;
@@ -503,11 +516,13 @@ function openUserModal(existing, actor, onSaved) {
         fmList.querySelectorAll('.family-member-row').forEach((row) => {
           const name = row.querySelector('.fm-name').value.trim();
           const birthDate = row.querySelector('.fm-birth').value;
+          const pastoralId = row.querySelector('.fm-pastoral')?.value || '';
           if (name) {
             familyMembers.push({
               id: row.dataset.memberId || undefined,
               name,
               birthDate,
+              pastoralId,
             });
           }
         });

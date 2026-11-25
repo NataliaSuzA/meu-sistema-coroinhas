@@ -202,10 +202,11 @@ export function openMyProfileModal(user, { onProfileUpdated } = {}) {
         });
       }
 
-      function addProfileMemberRow(preset = { id: '', name: '', birthDate: '' }) {
+      function addProfileMemberRow(preset = { id: '', name: '', birthDate: '', pastoralId: '' }) {
         const row = document.createElement('div');
         row.className = 'pf-member-row p-3 rounded-xl bg-white border border-[#E6DACE] space-y-2';
         row.dataset.memberId = preset.id || '';
+        row.dataset.pastoralId = preset.pastoralId || '';
         row.innerHTML = `
           <div class="flex items-center justify-between gap-2">
             <span class="pf-idx-label text-[11px] font-extrabold uppercase tracking-wider text-[#B45309]">Integrante</span>
@@ -275,6 +276,7 @@ export function openMyProfileModal(user, { onProfileUpdated } = {}) {
               id: row.dataset.memberId || undefined,
               name,
               birthDate,
+              pastoralId: row.dataset.pastoralId || '',
             });
           }
         });
