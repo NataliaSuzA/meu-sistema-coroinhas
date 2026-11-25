@@ -321,7 +321,7 @@ function openUserModal(existing, actor, onSaved) {
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Senha de Acesso ${existing ? '(deixe vazio p/ manter)' : '*'}</label>
-              <input name="password" type="password" ${existing ? '' : 'required'} value="" placeholder="${existing ? '••••••••' : 'Ex: pastoral2026'}"
+              <input name="password" type="password" ${existing ? '' : 'required'} minlength="6" value="" placeholder="${existing ? '••••••••' : 'Mínimo 6 caracteres'}"
                 class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm focus:border-[#B45309] outline-none">
             </div>
             <div>

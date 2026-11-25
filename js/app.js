@@ -69,6 +69,15 @@ let currentUser = null;
 let currentRoute = 'dashboard';
 let deferredInstallPrompt = null;
 
+function isLocalDevEnvironment() {
+  const host = window.location.hostname;
+  return host === 'localhost' || host === '127.0.0.1';
+}
+
+function canUseQuickProfileSwitcher(user) {
+  return isGeneralAdmin(user) || isLocalDevEnvironment();
+}
+
 function canAccessMenuItem(item, user, permissions) {
   if (!item || !user) return false;
   if (item.external) return true;
@@ -435,6 +444,7 @@ function bindGlobalEvents() {
   });
 
   document.getElementById('quick-profile-switcher')?.addEventListener('change', (e) => {
+    if (!canUseQuickProfileSwitcher(currentUser)) return;
     const target = dataService.getUserById(e.target.value);
     if (!target) return;
     closeNotificationsPopover();
@@ -481,43 +491,56 @@ function setMobileSidebar(open) {
 function showLoginScreen() {
   document.getElementById('app-shell').classList.add('hidden');
   document.getElementById('login-screen').classList.remove('hidden');
+  document.getElementById('login-form')?.reset();
+  document.getElementById('login-error')?.classList.add('hidden');
 
-  const pastorals = dataService.getPastorals();
-  const pastoralMap = Object.fromEntries(pastorals.map((p) => [p.id, p]));
+  const quickSection = document.getElementById('login-quick-profiles-section');
   const quickBox = document.getElementById('login-quick-profiles');
-  const demos = getDemoProfiles();
+  const allowQuickLogin = isLocalDevEnvironment();
 
-  quickBox.innerHTML = demos
-    .map((u) => {
-      const summary = getUserRoleSummary(u, pastorals);
-      const scope = describeUserScope(u, pastoralMap);
-      const isFam = isFamilyAccount(u);
-      return `
-        <button type="button" data-quick-login="${u.id}"
-          class="text-left p-3 rounded-xl border border-[#E6DACE] bg-[#FDFBF7] hover:border-[#D97706] hover:bg-amber-50/50 transition group">
-          <div class="flex items-center justify-between gap-2 mb-1">
-            <div class="flex items-center gap-2 min-w-0">
-              <span class="w-7 h-7 rounded-lg ${isFam ? 'bg-[#B45309] text-white' : 'bg-[#3E2723] text-amber-400'} text-[11px] font-extrabold flex items-center justify-center shrink-0">
-                ${isFam ? '<i data-lucide="users" class="w-3.5 h-3.5"></i>' : escapeHtml(getInitials(u.name))}
+  if (quickSection) {
+    quickSection.classList.toggle('hidden', !allowQuickLogin);
+  }
+
+  if (allowQuickLogin && quickBox) {
+    const pastorals = dataService.getPastorals();
+    const pastoralMap = Object.fromEntries(pastorals.map((p) => [p.id, p]));
+    const demos = getDemoProfiles();
+
+    quickBox.innerHTML = demos
+      .map((u) => {
+        const summary = getUserRoleSummary(u, pastorals);
+        const scope = describeUserScope(u, pastoralMap);
+        const isFam = isFamilyAccount(u);
+        return `
+          <button type="button" data-quick-login="${u.id}"
+            class="text-left p-3 rounded-xl border border-[#E6DACE] bg-[#FDFBF7] hover:border-[#D97706] hover:bg-amber-50/50 transition group">
+            <div class="flex items-center justify-between gap-2 mb-1">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-7 h-7 rounded-lg ${isFam ? 'bg-[#B45309] text-white' : 'bg-[#3E2723] text-amber-400'} text-[11px] font-extrabold flex items-center justify-center shrink-0">
+                  ${isFam ? '<i data-lucide="users" class="w-3.5 h-3.5"></i>' : escapeHtml(getInitials(u.name))}
+                </span>
+                <span class="text-xs font-extrabold text-[#3E2723] truncate">${escapeHtml(u.name.split(' ').slice(0, 2).join(' '))}</span>
+              </div>
+              <span class="inline-flex px-2 py-0.5 rounded-full text-[9px] font-bold border shrink-0 ${summary.badgeClass}">
+                ${escapeHtml(summary.label)}
               </span>
-              <span class="text-xs font-extrabold text-[#3E2723] truncate">${escapeHtml(u.name.split(' ').slice(0, 2).join(' '))}</span>
             </div>
-            <span class="inline-flex px-2 py-0.5 rounded-full text-[9px] font-bold border shrink-0 ${summary.badgeClass}">
-              ${escapeHtml(summary.label)}
-            </span>
-          </div>
-          <p class="text-[11px] text-[#6D4C41] truncate pl-9">${escapeHtml(scope)}</p>
-        </button>
-      `;
-    })
-    .join('');
+            <p class="text-[11px] text-[#6D4C41] truncate pl-9">${escapeHtml(scope)}</p>
+          </button>
+        `;
+      })
+      .join('');
 
-  quickBox.querySelectorAll('[data-quick-login]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const target = dataService.getUserById(btn.dataset.quickLogin);
-      if (target) loginAs(target);
+    quickBox.querySelectorAll('[data-quick-login]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const target = dataService.getUserById(btn.dataset.quickLogin);
+        if (target) loginAs(target);
+      });
     });
-  });
+  } else if (quickBox) {
+    quickBox.innerHTML = '';
+  }
 
   refreshIcons();
 }
@@ -586,23 +609,35 @@ function renderHeader() {
     <i data-lucide="user-cog" class="w-3.5 h-3.5 text-[#B45309] shrink-0 hidden sm:block"></i>
   `;
 
+  const switcherBox = document.getElementById('quick-profile-switcher-box');
   const switcher = document.getElementById('quick-profile-switcher');
-  const activeUsers = dataService.getUsers().filter((u) => u.status === 'Ativo');
-  const demoOrder = ['usr_admin', 'usr_natalia', 'usr_carlos', 'usr_familia_silva', 'usr_gabriel', 'usr_lucas', 'usr_joao'];
-  const demoSet = new Set(demoOrder);
-  const sorted = [
-    ...demoOrder.map((id) => activeUsers.find((u) => u.id === id)).filter(Boolean),
-    ...activeUsers.filter((u) => !demoSet.has(u.id)),
-  ];
+  const showSwitcher = canUseQuickProfileSwitcher(currentUser);
 
-  switcher.innerHTML = sorted
-    .map((u) => {
-      const scope = describeUserScope(u, pastoralMap);
-      const displayName = isFamilyAccount(u) ? u.name.split('(')[0].trim() : u.name.split(' ')[0];
-      const shortLabel = `${displayName} — ${scope}`;
-      return `<option value="${u.id}" ${u.id === currentUser.id ? 'selected' : ''}>${escapeHtml(shortLabel)}</option>`;
-    })
-    .join('');
+  if (switcherBox) {
+    switcherBox.classList.toggle('hidden', !showSwitcher);
+    switcherBox.classList.toggle('flex', showSwitcher);
+  }
+
+  if (showSwitcher && switcher) {
+    const activeUsers = dataService.getUsers().filter((u) => u.status === 'Ativo');
+    const demoOrder = ['usr_admin', 'usr_natalia', 'usr_carlos', 'usr_familia_silva', 'usr_gabriel', 'usr_lucas', 'usr_joao'];
+    const demoSet = new Set(demoOrder);
+    const sorted = [
+      ...demoOrder.map((id) => activeUsers.find((u) => u.id === id)).filter(Boolean),
+      ...activeUsers.filter((u) => !demoSet.has(u.id)),
+    ];
+
+    switcher.innerHTML = sorted
+      .map((u) => {
+        const scope = describeUserScope(u, pastoralMap);
+        const displayName = isFamilyAccount(u) ? u.name.split('(')[0].trim() : u.name.split(' ')[0];
+        const shortLabel = `${displayName} — ${scope}`;
+        return `<option value="${u.id}" ${u.id === currentUser.id ? 'selected' : ''}>${escapeHtml(shortLabel)}</option>`;
+      })
+      .join('');
+  } else if (switcher) {
+    switcher.innerHTML = '';
+  }
 
   refreshIcons();
 }
