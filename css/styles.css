@@ -1,11 +1,16 @@
-/* Estilos complementares da Pastoral dos Coroinhas e Acólitos */
+/* Identidade Visual Carmelita — Paróquia Santa Teresa d'Ávila */
 
 :root {
-  --navy-dark: #0F172A;
-  --navy-primary: #1E3A8A;
-  --gold-primary: #D97706;
-  --gold-accent: #F59E0B;
-  --surface-bg: #F8FAFC;
+  --carmel-deep: #2B1B18;
+  --carmel-dark: #3E2723;
+  --carmel-mid: #4E342E;
+  --carmel-warm: #5D4037;
+  --cream-bg: #FAF6F0;
+  --cream-soft: #F5EFE6;
+  --sand-border: #E6DACE;
+  --gold-primary: #B45309;
+  --gold-accent: #D97706;
+  --gold-bright: #F59E0B;
 }
 
 .custom-scrollbar::-webkit-scrollbar {
@@ -18,12 +23,12 @@
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.35);
+  background: rgba(141, 110, 99, 0.38);
   border-radius: 9999px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.6);
+  background: rgba(141, 110, 99, 0.65);
 }
 
 @keyframes modalIn {
@@ -58,18 +63,18 @@
 
 .devotional-pattern {
   background-image:
-    radial-gradient(circle at 88% 22%, rgba(245, 158, 11, 0.24) 0%, transparent 45%),
-    radial-gradient(circle at 12% 85%, rgba(59, 130, 246, 0.22) 0%, transparent 50%),
-    linear-gradient(135deg, #0F172A 0%, #172554 55%, #1E3A8A 100%);
+    radial-gradient(circle at 88% 22%, rgba(217, 119, 6, 0.28) 0%, transparent 45%),
+    radial-gradient(circle at 12% 85%, rgba(141, 110, 99, 0.24) 0%, transparent 50%),
+    linear-gradient(135deg, #2B1B18 0%, #3E2723 52%, #5D4037 100%);
 }
 
 .user-schedule-card {
-  border-color: #F59E0B !important;
-  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.28), 0 8px 22px -6px rgba(217, 119, 6, 0.14);
+  border-color: #D97706 !important;
+  box-shadow: 0 0 0 1px rgba(217, 119, 6, 0.28), 0 10px 24px -8px rgba(180, 83, 9, 0.18);
 }
 
 .sidebar-link-active {
-  background: linear-gradient(90deg, rgba(245, 158, 11, 0.18) 0%, rgba(30, 58, 138, 0.45) 100%);
+  background: linear-gradient(90deg, rgba(217, 119, 6, 0.26) 0%, rgba(93, 64, 55, 0.55) 100%);
   color: #FFFFFF;
   border-left: 3px solid #F59E0B;
 }
@@ -80,11 +85,11 @@
 }
 
 .calendar-cell {
-  min-height: 92px;
+  min-height: 94px;
 }
 
 @media (max-width: 640px) {
   .calendar-cell {
-    min-height: 64px;
+    min-height: 66px;
   }
 }

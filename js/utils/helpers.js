@@ -1,6 +1,6 @@
 /**
- * Utilitários compartilhados: formatação de datas, segurança HTML,
- * badges, modais, toasts e exportação CSV compatível com Excel.
+ * Utilitários compartilhados, regras de governança multi-pastoral (N:N),
+ * detecção de conflitos de horário, tags coloridas de pastorais, modais e CSV.
  */
 
 export function escapeHtml(str) {
@@ -12,9 +12,125 @@ export function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
-export function isCoordinator(user) {
-  return user?.category === 'Coordenador';
+// --- Governança & Isolamento Multi-Pastoral (N:N) ---
+
+export function isGeneralAdmin(user) {
+  return Boolean(user?.isGeneralAdmin);
 }
+
+export function getUserMemberships(user) {
+  return Array.isArray(user?.memberships) ? user.memberships : [];
+}
+
+export function getCoordinatedPastoralIds(user, allPastorals = []) {
+  if (!user) return [];
+  if (isGeneralAdmin(user)) return allPastorals.map((p) => p.id);
+  return getUserMemberships(user)
+    .filter((m) => m.role === 'Coordenador')
+    .map((m) => m.pastoralId);
+}
+
+export function getMemberPastoralIds(user, allPastorals = []) {
+  if (!user) return [];
+  if (isGeneralAdmin(user)) return allPastorals.map((p) => p.id);
+  return Array.from(new Set(getUserMemberships(user).map((m) => m.pastoralId)));
+}
+
+export function isAnyCoordinator(user) {
+  if (!user) return false;
+  return isGeneralAdmin(user) || getUserMemberships(user).some((m) => m.role === 'Coordenador');
+}
+
+export function canManagePastoral(user, pastoralId) {
+  if (!user) return false;
+  if (isGeneralAdmin(user)) return true;
+  if (!pastoralId || pastoralId === 'all') return false;
+  return getUserMemberships(user).some((m) => m.pastoralId === pastoralId && m.role === 'Coordenador');
+}
+
+export function canManageSchedule(user, schedule) {
+  if (!user || !schedule) return false;
+  if (isGeneralAdmin(user)) return true;
+  if (canManagePastoral(user, schedule.pastoralId)) return true;
+  return (schedule.assignments || []).some((a) => canManagePastoral(user, a.pastoralId));
+}
+
+export function getUserRoleSummary(user, pastorals = []) {
+  if (!user) return { label: '', badgeClass: 'bg-[#F5EFE6] text-[#5D4037] border-[#E6DACE]' };
+  if (isGeneralAdmin(user)) {
+    return {
+      label: 'Coordenação Geral',
+      badgeClass: 'bg-amber-100 text-[#92400E] border-amber-400',
+    };
+  }
+  const coordIds = getCoordinatedPastoralIds(user, pastorals);
+  if (coordIds.length > 0) {
+    const first = getFirstName(user.name).toLowerCase();
+    const title = first.endsWith('a') ? 'Coordenadora' : 'Coordenador';
+    return {
+      label: coordIds.length === 1 ? title : `${title} (${coordIds.length})`,
+      badgeClass: 'bg-[#4E342E] text-amber-300 border-[#3E2723]',
+    };
+  }
+  const memberCount = getUserMemberships(user).length;
+  return {
+    label: memberCount > 1 ? `Membro (${memberCount} pastorais)` : 'Membro',
+    badgeClass: 'bg-[#F5EFE6] text-[#4E342E] border-[#D7C4B2]',
+  };
+}
+
+export function renderPastoralPill(pastoral, { compact = false } = {}) {
+  if (!pastoral) {
+    return `<span class="inline-flex items-center gap-1.5 ${compact ? 'px-2 py-0.5 text-[10px]' : 'px-2.5 py-0.5 text-[11px]'} rounded-full font-bold bg-[#F5EFE6] text-[#5D4037] border border-[#E6DACE]">Geral</span>`;
+  }
+  const color = pastoral.color || '#5D4037';
+  const label = pastoral.shortName || pastoral.name;
+  return `
+    <span class="inline-flex items-center gap-1.5 ${compact ? 'px-2 py-0.5 text-[10px]' : 'px-2.5 py-0.5 text-[11px]'} rounded-full font-bold border"
+      style="background-color: ${escapeHtml(color)}18; color: ${escapeHtml(color)}; border-color: ${escapeHtml(color)}44;">
+      <span class="w-1.5 h-1.5 rounded-full shrink-0" style="background-color: ${escapeHtml(color)};"></span>
+      ${escapeHtml(label)}
+    </span>
+  `;
+}
+
+// --- Detecção Amigável de Conflitos de Horário ---
+
+/**
+ * Retorna um mapa { `${userId}|${date}|${time}`: count } para identificar
+ * automaticamente múltiplas escalas no mesmo dia e horário.
+ */
+export function buildUserTimeSlotIndex(schedules) {
+  const counts = {};
+  schedules.forEach((sch) => {
+    (sch.assignments || []).forEach((asg) => {
+      const key = `${asg.userId}|${sch.date}|${sch.time}`;
+      counts[key] = (counts[key] || 0) + 1;
+    });
+  });
+  return counts;
+}
+
+export function hasTimeConflict(slotIndex, userId, date, time) {
+  return (slotIndex[`${userId}|${date}|${time}`] || 0) > 1;
+}
+
+export function findConflictsForMember(schedules, userId, date, time, excludeScheduleId = null) {
+  if (!userId || !date || !time) return [];
+  const matches = [];
+  schedules.forEach((sch) => {
+    if (excludeScheduleId && sch.id === excludeScheduleId) return;
+    if (sch.date !== date || sch.time !== time) return;
+    (sch.assignments || []).forEach((asg) => {
+      if (asg.userId === userId) {
+        matches.push({ schedule: sch, assignment: asg });
+      }
+    });
+  });
+  return matches;
+}
+
+// --- Formatação e UI ---
 
 export function getFirstName(fullName) {
   return (fullName || '').trim().split(/\s+/)[0] || 'Usuário';
@@ -65,37 +181,16 @@ export const MONTHS_PT = [
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
 ];
 
-export function getCategoryDisplayLabel(category, userName = '') {
-  if (category === 'Coordenador') {
-    const first = getFirstName(userName).toLowerCase();
-    return first.endsWith('a') ? 'Coordenadora' : 'Coordenador';
-  }
-  return category || '';
-}
-
-export function getCategoryBadgeClass(category) {
-  switch (category) {
-    case 'Coordenador':
-      return 'bg-amber-100 text-amber-800 border-amber-300';
-    case 'Acólito':
-      return 'bg-blue-100 text-blue-900 border-blue-200';
-    case 'Coroinha':
-      return 'bg-indigo-100 text-indigo-800 border-indigo-200';
-    default:
-      return 'bg-slate-100 text-slate-700 border-slate-200';
-  }
-}
-
 export function getStatusBadgeClass(status) {
   switch (status) {
     case 'Ativo':
-      return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+      return 'bg-emerald-50 text-emerald-800 border-emerald-200';
     case 'Inativo':
-      return 'bg-slate-100 text-slate-600 border-slate-200';
+      return 'bg-stone-100 text-stone-600 border-stone-200';
     case 'Bloqueado':
       return 'bg-red-50 text-red-700 border-red-200';
     default:
-      return 'bg-slate-100 text-slate-700 border-slate-200';
+      return 'bg-stone-100 text-stone-700 border-stone-200';
   }
 }
 
@@ -110,12 +205,12 @@ export function showToast(message, type = 'success') {
   if (!container) return;
 
   const palette = {
-    success: 'bg-[#0F172A] text-white border-amber-500/60',
-    error: 'bg-red-700 text-white border-red-400',
-    info: 'bg-[#1E3A8A] text-white border-blue-400',
+    success: 'bg-[#3E2723] text-white border-amber-500/70',
+    error: 'bg-red-800 text-white border-red-400',
+    info: 'bg-[#4E342E] text-white border-amber-400/60',
   };
   const icon = type === 'error' ? 'alert-circle' : type === 'info' ? 'info' : 'check-circle-2';
-  const iconColor = type === 'success' ? 'text-amber-400' : 'text-white';
+  const iconColor = type === 'error' ? 'text-white' : 'text-amber-400';
 
   const el = document.createElement('div');
   el.className = `pointer-events-auto animate-toast-in flex items-center gap-3 px-4 py-3 rounded-xl border shadow-lg text-sm font-medium ${palette[type] || palette.success}`;
@@ -140,7 +235,7 @@ export function openModal({ title, bodyHtml, maxWidth = 'max-w-xl', onMount }) {
   const bodyEl = document.getElementById('modal-body');
   if (!root || !dialog || !titleEl || !bodyEl) return;
 
-  dialog.className = `bg-white rounded-2xl shadow-2xl border border-slate-200 w-full ${maxWidth} my-8 overflow-hidden animate-modal-in`;
+  dialog.className = `bg-[#FDFBF7] rounded-2xl shadow-2xl border border-[#E6DACE] w-full ${maxWidth} my-8 overflow-hidden animate-modal-in`;
   titleEl.textContent = title;
   bodyEl.innerHTML = bodyHtml;
 
@@ -181,61 +276,74 @@ export function exportToCSV(filename, headers, rows) {
 }
 
 /**
- * Sincronização automática entre Escalas e Agenda:
- * Retorna todos os compromissos (escalas vinculadas ao usuário + eventos gerais)
- * ordenados por data/hora.
+ * Sincronização automática entre Escalas Multi-Pastoral e Agenda:
+ * Unifica todas as escalas do usuário com a tag colorida da pastoral + função,
+ * respeitando estritamente o isolamento de gestão dos coordenadores.
  */
-export function buildSyncedAgendaItems(user, { schedules, events, roles, includeAllSchedules = false }) {
+export function buildSyncedAgendaItems(user, { schedules, events, roles, pastorals, includeManagedSchedules = false }) {
   const roleMap = Object.fromEntries(roles.map((r) => [r.id, r.name]));
+  const pastoralMap = Object.fromEntries(pastorals.map((p) => [p.id, p]));
+  const slotIndex = buildUserTimeSlotIndex(schedules);
+  const memberPastoralIds = new Set(getMemberPastoralIds(user, pastorals));
   const items = [];
 
   schedules.forEach((sch) => {
-    const myAssignments = sch.assignments.filter((a) => a.userId === user.id);
+    const myAssignments = (sch.assignments || []).filter((a) => a.userId === user.id);
+
     if (myAssignments.length > 0) {
-      const myRoleNames = myAssignments.map((a) => roleMap[a.roleId] || 'Função').join(', ');
-      items.push({
-        id: `sync_${sch.id}`,
-        sourceId: sch.id,
-        sourceType: 'schedule',
-        isPersonalSchedule: true,
-        date: sch.date,
-        time: sch.time,
-        title: `${sch.celebrationType} • ${sch.location}`,
-        shortTag: `${sch.time} - ${sch.location} (${myRoleNames})`,
-        roleNames: myRoleNames,
-        location: sch.location,
-        category: sch.category,
-        eventType: 'Minha Escala',
-        description: sch.notes || `Escalado(a) como ${myRoleNames}`,
-        hasSubRequest: myAssignments.some((a) => a.substitutionRequested),
+      myAssignments.forEach((asg) => {
+        const pastoral = pastoralMap[asg.pastoralId] || pastoralMap[sch.pastoralId];
+        const roleName = roleMap[asg.roleId] || 'Função';
+        items.push({
+          id: `sync_${sch.id}_${asg.id}`,
+          sourceId: sch.id,
+          sourceType: 'schedule',
+          isPersonalSchedule: true,
+          date: sch.date,
+          time: sch.time,
+          title: `${sch.celebrationType} • ${sch.location}`,
+          shortTag: `${sch.time} - ${sch.location} (${roleName})`,
+          roleNames: roleName,
+          location: sch.location,
+          pastoral,
+          pastoralId: pastoral?.id || sch.pastoralId,
+          eventType: 'Minha Escala',
+          description: sch.notes || `Escalado(a) como ${roleName}`,
+          hasSubRequest: Boolean(asg.substitutionRequested),
+          hasConflict: hasTimeConflict(slotIndex, user.id, sch.date, sch.time),
+        });
       });
-    } else if (includeAllSchedules) {
+    } else if (includeManagedSchedules && canManageSchedule(user, sch)) {
+      const pastoral = pastoralMap[sch.pastoralId];
       items.push({
-        id: `sync_all_${sch.id}`,
+        id: `sync_mgmt_${sch.id}`,
         sourceId: sch.id,
         sourceType: 'schedule',
         isPersonalSchedule: false,
         date: sch.date,
         time: sch.time,
-        title: `${sch.celebrationType} (${sch.category})`,
+        title: `${sch.celebrationType} • ${pastoral?.shortName || 'Pastoral'}`,
         shortTag: `${sch.time} - ${sch.location}`,
         roleNames: '',
         location: sch.location,
-        category: sch.category,
-        eventType: 'Missa / Escala',
+        pastoral,
+        pastoralId: sch.pastoralId,
+        eventType: 'Escala da Pastoral',
         description: sch.notes || '',
-        hasSubRequest: sch.assignments.some((a) => a.substitutionRequested),
+        hasSubRequest: (sch.assignments || []).some((a) => a.substitutionRequested),
+        hasConflict: false,
       });
     }
   });
 
   events.forEach((evt) => {
     const visibleToUser =
-      isCoordinator(user) ||
-      evt.audience === 'Todos' ||
-      evt.audience === user.category;
+      isGeneralAdmin(user) ||
+      evt.pastoralId === 'all' ||
+      memberPastoralIds.has(evt.pastoralId);
     if (!visibleToUser) return;
 
+    const pastoral = evt.pastoralId === 'all' ? null : pastoralMap[evt.pastoralId];
     items.push({
       id: evt.id,
       sourceId: evt.id,
@@ -247,9 +355,11 @@ export function buildSyncedAgendaItems(user, { schedules, events, roles, include
       shortTag: `${evt.time} - ${evt.title}`,
       roleNames: '',
       location: evt.location,
-      category: evt.audience,
+      pastoral,
+      pastoralId: evt.pastoralId,
       eventType: evt.type,
       description: evt.description || '',
+      canEdit: isGeneralAdmin(user) || canManagePastoral(user, evt.pastoralId),
       rawEvent: evt,
     });
   });

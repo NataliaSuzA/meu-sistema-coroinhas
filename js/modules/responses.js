@@ -1,41 +1,53 @@
 /**
- * Módulo 8: Respostas de Formulários (Exclusivo Coordenação)
- * Painel consolidado por formulário mostrando quem respondeu, respostas detalhadas
- * e exportação em CSV compatível com Excel.
+ * Módulo 8: Respostas de Formulários (Isolamento por Pastoral)
+ * Coordenadores visualizam e exportam (CSV/Excel) apenas respostas
+ * dos formulários pertencentes às pastorais que coordenam (Admin Geral vê todos).
  */
 
 import { dataService } from '../services/dataService.js';
 import {
+  canManagePastoral,
   escapeHtml,
   exportToCSV,
   formatDateTimeBR,
-  getCategoryBadgeClass,
+  getUserMemberships,
+  isGeneralAdmin,
   refreshIcons,
+  renderPastoralPill,
   showToast,
 } from '../utils/helpers.js';
 
 let selectedFormId = null;
 
-export function renderResponses(container) {
-  const forms = dataService.getForms();
+export function renderResponses(container, { user }) {
+  const generalAdmin = isGeneralAdmin(user);
+  const pastorals = dataService.getPastorals();
+  const pastoralMap = Object.fromEntries(pastorals.map((p) => [p.id, p]));
+  const allForms = dataService.getForms();
+  const managedForms = allForms.filter((f) => generalAdmin || canManagePastoral(user, f.pastoralId));
+
   const responses = dataService.getResponses();
   const users = dataService.getUsers();
   const userMap = Object.fromEntries(users.map((u) => [u.id, u]));
 
-  if (!selectedFormId || !forms.some((f) => f.id === selectedFormId)) {
-    selectedFormId = forms[0]?.id || null;
+  if (!selectedFormId || !managedForms.some((f) => f.id === selectedFormId)) {
+    selectedFormId = managedForms[0]?.id || null;
   }
 
-  const activeForm = forms.find((f) => f.id === selectedFormId) || null;
+  const activeForm = managedForms.find((f) => f.id === selectedFormId) || null;
   const formResponses = activeForm ? responses.filter((r) => r.formId === activeForm.id) : [];
 
   container.innerHTML = `
     <div class="space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h3 class="text-xl font-extrabold text-[#0F172A]">Respostas dos Formulários</h3>
-          <p class="text-sm text-slate-500 mt-0.5">
-            Painel consolidado de respostas enviadas pelos membros com exportação para Excel (CSV).
+          <h3 class="text-xl font-extrabold text-[#3E2723]">Respostas dos Formulários</h3>
+          <p class="text-sm text-[#6D4C41] mt-0.5">
+            ${
+              generalAdmin
+                ? 'Painel consolidado de todas as pastorais com exportação para Excel (CSV).'
+                : 'Exibindo apenas formulários pertencentes às pastorais que você coordena.'
+            }
           </p>
         </div>
 
@@ -43,7 +55,7 @@ export function renderResponses(container) {
           activeForm
             ? `
           <button id="btn-export-csv" type="button"
-            class="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-semibold shadow-sm transition">
+            class="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-sm font-semibold shadow-sm transition shrink-0">
             <i data-lucide="download" class="w-4 h-4"></i>
             Exportar CSV / Excel
           </button>
@@ -53,54 +65,53 @@ export function renderResponses(container) {
       </div>
 
       ${
-        forms.length === 0
+        managedForms.length === 0
           ? `
-        <div class="bg-white rounded-2xl border border-dashed border-slate-300 p-10 text-center text-slate-500">
-          Nenhum formulário cadastrado ainda.
+        <div class="bg-white rounded-2xl border border-dashed border-[#D7C4B2] p-10 text-center text-[#6D4C41]">
+          Nenhum formulário cadastrado nas pastorais sob sua coordenação ainda.
         </div>
       `
           : `
-        <!-- Seletor de Formulário -->
-        <div class="bg-white rounded-2xl border border-slate-200/90 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+        <div class="bg-white rounded-2xl border border-[#E6DACE] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
           <div class="flex-1">
-            <label for="responses-form-select" class="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Selecionar Formulário</label>
-            <select id="responses-form-select" class="w-full px-3.5 py-2 rounded-xl border border-slate-200 bg-slate-50 text-sm font-semibold text-[#0F172A] outline-none focus:border-[#1E3A8A]">
-              ${forms
+            <label for="responses-form-select" class="block text-[11px] font-bold uppercase tracking-wider text-[#6D4C41] mb-1">Selecionar Formulário</label>
+            <select id="responses-form-select" class="w-full px-3.5 py-2 rounded-xl border border-[#E6DACE] bg-[#FAF6F0] text-sm font-semibold text-[#3E2723] outline-none focus:border-[#B45309]">
+              ${managedForms
                 .map((f) => {
                   const cnt = responses.filter((r) => r.formId === f.id).length;
-                  return `<option value="${f.id}" ${f.id === selectedFormId ? 'selected' : ''}>${escapeHtml(f.title)} (${cnt} ${cnt === 1 ? 'resposta' : 'respostas'})</option>`;
+                  const pLabel = f.pastoralId === 'all' ? 'Geral' : pastoralMap[f.pastoralId]?.shortName || 'Pastoral';
+                  return `<option value="${f.id}" ${f.id === selectedFormId ? 'selected' : ''}>[${escapeHtml(pLabel)}] ${escapeHtml(f.title)} (${cnt})</option>`;
                 })
                 .join('')}
             </select>
           </div>
           <div class="flex items-center gap-3 shrink-0">
-            <div class="px-4 py-2 rounded-xl bg-blue-50 border border-blue-200 text-center">
-              <p class="text-[10px] font-bold uppercase tracking-wider text-blue-700">Público</p>
-              <p class="text-sm font-extrabold text-[#1E3A8A]">${escapeHtml(activeForm.audience)}</p>
+            <div class="px-3.5 py-2 rounded-xl bg-[#FDFBF7] border border-[#E6DACE] text-center">
+              <p class="text-[10px] font-bold uppercase tracking-wider text-[#8D6E63] mb-1">Pastoral</p>
+              ${renderPastoralPill(activeForm.pastoralId === 'all' ? null : pastoralMap[activeForm.pastoralId], { compact: true })}
             </div>
             <div class="px-4 py-2 rounded-xl bg-amber-50 border border-amber-200 text-center">
-              <p class="text-[10px] font-bold uppercase tracking-wider text-amber-700">Respostas</p>
-              <p class="text-sm font-extrabold text-amber-900">${formResponses.length}</p>
+              <p class="text-[10px] font-bold uppercase tracking-wider text-[#B45309]">Respostas</p>
+              <p class="text-sm font-extrabold text-[#3E2723]">${formResponses.length}</p>
             </div>
           </div>
         </div>
 
-        <!-- Lista Consolidada de Respostas -->
         ${
           formResponses.length === 0
             ? `
-          <div class="bg-white rounded-2xl border border-dashed border-slate-300 p-10 text-center">
-            <i data-lucide="inbox" class="w-10 h-10 text-slate-400 mx-auto mb-3"></i>
-            <h4 class="text-base font-bold text-slate-700">Ainda não há respostas para este formulário</h4>
-            <p class="text-sm text-slate-500 mt-1">Assim que os membros enviarem suas respostas, elas aparecerão consolidadas aqui.</p>
+          <div class="bg-white rounded-2xl border border-dashed border-[#D7C4B2] p-10 text-center">
+            <i data-lucide="inbox" class="w-10 h-10 text-[#8D6E63] mx-auto mb-3"></i>
+            <h4 class="text-base font-bold text-[#3E2723]">Ainda não há respostas para este formulário</h4>
+            <p class="text-sm text-[#6D4C41] mt-1">Assim que os membros responderem, os dados consolidados aparecerão aqui.</p>
           </div>
         `
             : `
-          <div class="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
+          <div class="bg-white rounded-2xl border border-[#E6DACE] shadow-xs overflow-hidden">
             <div class="overflow-x-auto">
               <table class="w-full text-left border-collapse">
                 <thead>
-                  <tr class="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  <tr class="bg-[#FDFBF7] border-b border-[#E6DACE] text-[11px] font-bold uppercase tracking-wider text-[#6D4C41]">
                     <th class="px-5 py-3.5 whitespace-nowrap">Membro</th>
                     <th class="px-4 py-3.5 whitespace-nowrap">Enviado em</th>
                     ${activeForm.questions
@@ -108,24 +119,23 @@ export function renderResponses(container) {
                       .join('')}
                   </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-100 text-sm">
+                <tbody class="divide-y divide-[#E6DACE]/60 text-sm">
                   ${formResponses
                     .map((resp) => {
                       const member = userMap[resp.userId];
+                      const mems = getUserMemberships(member);
                       return `
-                        <tr class="hover:bg-slate-50/70 align-top">
+                        <tr class="hover:bg-[#FAF6F0]/70 align-top">
                           <td class="px-5 py-3.5 whitespace-nowrap">
-                            <p class="font-bold text-[#0F172A]">${escapeHtml(member?.name || 'Membro removido')}</p>
-                            ${
-                              member
-                                ? `<span class="inline-flex mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${getCategoryBadgeClass(member.category)}">${escapeHtml(member.category)}</span>`
-                                : ''
-                            }
+                            <p class="font-bold text-[#3E2723]">${escapeHtml(member?.name || 'Membro removido')}</p>
+                            <div class="flex items-center gap-1 flex-wrap mt-1">
+                              ${mems.slice(0, 2).map((m) => renderPastoralPill(pastoralMap[m.pastoralId], { compact: true })).join('')}
+                            </div>
                           </td>
-                          <td class="px-4 py-3.5 text-xs text-slate-500 whitespace-nowrap">${escapeHtml(formatDateTimeBR(resp.submittedAt))}</td>
+                          <td class="px-4 py-3.5 text-xs text-[#8D6E63] whitespace-nowrap">${escapeHtml(formatDateTimeBR(resp.submittedAt))}</td>
                           ${activeForm.questions
                             .map(
-                              (q) => `<td class="px-4 py-3.5 text-xs text-slate-700 leading-relaxed">${escapeHtml(resp.answers?.[q.id] || '—')}</td>`,
+                              (q) => `<td class="px-4 py-3.5 text-xs text-[#4E342E] leading-relaxed">${escapeHtml(resp.answers?.[q.id] || '—')}</td>`,
                             )
                             .join('')}
                         </tr>
@@ -145,7 +155,7 @@ export function renderResponses(container) {
 
   container.querySelector('#responses-form-select')?.addEventListener('change', (e) => {
     selectedFormId = e.target.value;
-    renderResponses(container);
+    renderResponses(container, { user });
   });
 
   container.querySelector('#btn-export-csv')?.addEventListener('click', () => {
@@ -156,16 +166,19 @@ export function renderResponses(container) {
     }
     const headers = [
       'Membro',
-      'Categoria',
+      'Pastorais',
       'E-mail',
       'Data/Hora Envio',
       ...activeForm.questions.map((q) => q.text),
     ];
     const rows = formResponses.map((resp) => {
       const m = userMap[resp.userId];
+      const pNames = getUserMemberships(m)
+        .map((mem) => `${pastoralMap[mem.pastoralId]?.shortName || 'Pastoral'} (${mem.role})`)
+        .join(', ');
       return [
         m?.name || 'Membro removido',
-        m?.category || '—',
+        m?.isGeneralAdmin ? 'Coordenação Geral' : pNames || '—',
         m?.email || '—',
         formatDateTimeBR(resp.submittedAt),
         ...activeForm.questions.map((q) => resp.answers?.[q.id] || ''),

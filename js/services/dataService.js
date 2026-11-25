@@ -1,7 +1,5 @@
 /**
- * Serviço de domínio centralizado.
- * Encapsula todas as leituras e escritas em coleções, pronto para
- * futura migração ao Firebase Firestore mantendo a mesma API.
+ * Serviço de domínio multi-pastoral (pronto para futura migração ao Firestore).
  */
 
 import { storageAdapter, COLLECTIONS } from './storage.js';
@@ -20,6 +18,7 @@ export const dataService = {
 
   resetToDemoData() {
     const seed = buildSeedData();
+    storageAdapter.saveCollection(COLLECTIONS.PASTORALS, seed.pastorals);
     storageAdapter.saveCollection(COLLECTIONS.USERS, seed.users);
     storageAdapter.saveCollection(COLLECTIONS.ROLES, seed.roles);
     storageAdapter.saveCollection(COLLECTIONS.SCHEDULES, seed.schedules);
@@ -48,18 +47,54 @@ export const dataService = {
     return storageAdapter.getDocument(COLLECTIONS.SETTINGS, {
       instagramUrl: 'https://www.instagram.com/',
       parishName: "Paróquia Santa Teresa d'Ávila",
-      pastoralName: 'Pastoral dos Coroinhas e Acólitos',
+      subtitle: 'Gestão Pastoral',
     });
   },
 
   updateSettings(patch) {
-    const current = this.getSettings();
-    const updated = { ...current, ...patch };
+    const updated = { ...this.getSettings(), ...patch };
     storageAdapter.saveDocument(COLLECTIONS.SETTINGS, updated);
     return updated;
   },
 
-  // --- Usuários ---
+  // --- Pastorais ---
+  getPastorals() {
+    return storageAdapter.getCollection(COLLECTIONS.PASTORALS, []);
+  },
+
+  getActivePastorals() {
+    return this.getPastorals().filter((p) => p.active);
+  },
+
+  getPastoralById(id) {
+    return this.getPastorals().find((p) => p.id === id) || null;
+  },
+
+  savePastoral(pastoral) {
+    const list = this.getPastorals();
+    if (pastoral.id) {
+      const idx = list.findIndex((p) => p.id === pastoral.id);
+      if (idx >= 0) list[idx] = { ...list[idx], ...pastoral };
+    } else {
+      pastoral = { ...pastoral, id: genId('pas') };
+      list.push(pastoral);
+    }
+    storageAdapter.saveCollection(COLLECTIONS.PASTORALS, list);
+    return pastoral;
+  },
+
+  deletePastoral(id) {
+    storageAdapter.saveCollection(COLLECTIONS.PASTORALS, this.getPastorals().filter((p) => p.id !== id));
+    storageAdapter.saveCollection(COLLECTIONS.ROLES, this.getRoles().filter((r) => r.pastoralId !== id));
+    // Remove vínculos da pastoral excluída nos usuários
+    const updatedUsers = this.getUsers().map((u) => ({
+      ...u,
+      memberships: (u.memberships || []).filter((m) => m.pastoralId !== id),
+    }));
+    storageAdapter.saveCollection(COLLECTIONS.USERS, updatedUsers);
+  },
+
+  // --- Usuários (N:N com Pastorais) ---
   getUsers() {
     return storageAdapter.getCollection(COLLECTIONS.USERS, []);
   },
@@ -68,21 +103,24 @@ export const dataService = {
     return this.getUsers().find((u) => u.id === id) || null;
   },
 
-  getActiveUsersByCategory(category) {
-    return this.getUsers().filter((u) => u.status === 'Ativo' && u.category === category);
+  getActiveUsersByPastoral(pastoralId) {
+    return this.getUsers().filter(
+      (u) => u.status === 'Ativo' && (u.memberships || []).some((m) => m.pastoralId === pastoralId),
+    );
   },
 
   saveUser(user) {
     const list = this.getUsers();
+    const cleanMemberships = (user.memberships || []).filter((m) => m.pastoralId && m.role);
     if (user.id) {
       const idx = list.findIndex((u) => u.id === user.id);
       if (idx >= 0) {
-        list[idx] = { ...list[idx], ...user };
+        list[idx] = { ...list[idx], ...user, memberships: cleanMemberships };
       } else {
-        list.push(user);
+        list.push({ ...user, memberships: cleanMemberships });
       }
     } else {
-      user = { ...user, id: genId('usr') };
+      user = { ...user, id: genId('usr'), memberships: cleanMemberships };
       list.push(user);
     }
     storageAdapter.saveCollection(COLLECTIONS.USERS, list);
@@ -90,17 +128,20 @@ export const dataService = {
   },
 
   deleteUser(id) {
-    const list = this.getUsers().filter((u) => u.id !== id);
-    storageAdapter.saveCollection(COLLECTIONS.USERS, list);
+    storageAdapter.saveCollection(COLLECTIONS.USERS, this.getUsers().filter((u) => u.id !== id));
   },
 
-  // --- Funções Litúrgicas ---
+  // --- Funções por Pastoral ---
   getRoles() {
     return storageAdapter.getCollection(COLLECTIONS.ROLES, []);
   },
 
-  getActiveRoles() {
-    return this.getRoles().filter((r) => r.active);
+  getRolesByPastoral(pastoralId) {
+    return this.getRoles().filter((r) => r.pastoralId === pastoralId);
+  },
+
+  getActiveRolesByPastoral(pastoralId) {
+    return this.getRoles().filter((r) => r.pastoralId === pastoralId && r.active);
   },
 
   getRoleById(id) {
@@ -121,11 +162,10 @@ export const dataService = {
   },
 
   deleteRole(id) {
-    const list = this.getRoles().filter((r) => r.id !== id);
-    storageAdapter.saveCollection(COLLECTIONS.ROLES, list);
+    storageAdapter.saveCollection(COLLECTIONS.ROLES, this.getRoles().filter((r) => r.id !== id));
   },
 
-  // --- Escalas ---
+  // --- Escalas Multi-Pastoral ---
   getSchedules() {
     return storageAdapter.getCollection(COLLECTIONS.SCHEDULES, []);
   },
@@ -138,19 +178,23 @@ export const dataService = {
     const list = this.getSchedules();
     const normalizedAssignments = (schedule.assignments || []).map((a) => ({
       id: a.id || genId('asg'),
+      pastoralId: a.pastoralId || schedule.pastoralId,
       roleId: a.roleId,
       userId: a.userId,
       substitutionRequested: Boolean(a.substitutionRequested),
       substitutionReason: a.substitutionReason || '',
     }));
 
+    const distinctPastorals = Array.from(new Set(normalizedAssignments.map((a) => a.pastoralId).filter(Boolean)));
+    const derivedPastoralId = schedule.pastoralId || distinctPastorals[0] || 'pas_coroinhas';
+
     if (schedule.id) {
       const idx = list.findIndex((s) => s.id === schedule.id);
       if (idx >= 0) {
-        list[idx] = { ...list[idx], ...schedule, assignments: normalizedAssignments };
+        list[idx] = { ...list[idx], ...schedule, pastoralId: derivedPastoralId, assignments: normalizedAssignments };
       }
     } else {
-      schedule = { ...schedule, id: genId('sch'), assignments: normalizedAssignments };
+      schedule = { ...schedule, id: genId('sch'), pastoralId: derivedPastoralId, assignments: normalizedAssignments };
       list.push(schedule);
     }
     storageAdapter.saveCollection(COLLECTIONS.SCHEDULES, list);
@@ -158,8 +202,7 @@ export const dataService = {
   },
 
   deleteSchedule(id) {
-    const list = this.getSchedules().filter((s) => s.id !== id);
-    storageAdapter.saveCollection(COLLECTIONS.SCHEDULES, list);
+    storageAdapter.saveCollection(COLLECTIONS.SCHEDULES, this.getSchedules().filter((s) => s.id !== id));
   },
 
   requestSubstitution(scheduleId, assignmentId, reason) {
@@ -206,8 +249,7 @@ export const dataService = {
   },
 
   deleteEvent(id) {
-    const list = this.getEvents().filter((e) => e.id !== id);
-    storageAdapter.saveCollection(COLLECTIONS.EVENTS, list);
+    storageAdapter.saveCollection(COLLECTIONS.EVENTS, this.getEvents().filter((e) => e.id !== id));
   },
 
   // --- Bloco de Notas ---
@@ -229,8 +271,7 @@ export const dataService = {
   },
 
   deleteNote(id) {
-    const list = this.getNotes().filter((n) => n.id !== id);
-    storageAdapter.saveCollection(COLLECTIONS.NOTES, list);
+    storageAdapter.saveCollection(COLLECTIONS.NOTES, this.getNotes().filter((n) => n.id !== id));
   },
 
   // --- Formulários e Respostas ---
@@ -295,7 +336,9 @@ export const dataService = {
     const list = this.getNotices();
     if (notice.pinned) {
       list.forEach((n) => {
-        n.pinned = false;
+        if (n.pastoralId === notice.pastoralId || notice.pastoralId === 'all') {
+          n.pinned = false;
+        }
       });
     }
     if (notice.id) {
@@ -314,9 +357,11 @@ export const dataService = {
     const target = list.find((n) => n.id === id);
     if (!target) return;
     const willPin = !target.pinned;
-    list.forEach((n) => {
-      n.pinned = false;
-    });
+    if (willPin) {
+      list.forEach((n) => {
+        if (n.pastoralId === target.pastoralId) n.pinned = false;
+      });
+    }
     target.pinned = willPin;
     storageAdapter.saveCollection(COLLECTIONS.NOTICES, list);
   },
