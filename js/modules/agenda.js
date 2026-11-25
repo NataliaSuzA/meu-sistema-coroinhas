@@ -337,6 +337,8 @@ export function renderAgenda(container, { user }) {
 
 function openEventModal(existing, user, onSaved) {
   const pastorals = dataService.getActivePastorals();
+  const activeLocations = dataService.getActiveLocations();
+  const activeCelebrationTypes = dataService.getActiveCelebrationTypes();
   const managedIds = new Set(getCoordinatedPastoralIds(user, pastorals));
   const managedPastorals = pastorals.filter((p) => managedIds.has(p.id));
   const generalAdmin = isGeneralAdmin(user);
@@ -352,19 +354,41 @@ function openEventModal(existing, user, onSaved) {
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
           <div>
-            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Tipo *</label>
+            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Tipo de Celebração *</label>
+            <select name="celebrationTypeId" required class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm outline-none focus:border-[#B45309]">
+              ${activeCelebrationTypes
+                .map(
+                  (ct) => `<option value="${ct.id}" ${existing?.celebrationTypeId === ct.id ? 'selected' : ''}>${escapeHtml(ct.name)}</option>`,
+                )
+                .join('')}
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Categoria do Evento *</label>
             <select name="type" class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm outline-none focus:border-[#B45309]">
-              ${['Ensaio', 'Reunião', 'Formação', 'Missa', 'Confraternização']
+              ${['Ensaio', 'Reunião', 'Formação', 'Celebração', 'Confraternização']
                 .map((t) => `<option value="${t}" ${existing?.type === t ? 'selected' : ''}>${t}</option>`)
                 .join('')}
             </select>
           </div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
           <div>
             <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Pastoral *</label>
             <select name="pastoralId" class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm outline-none focus:border-[#B45309]">
               ${generalAdmin ? `<option value="all" ${existing?.pastoralId === 'all' ? 'selected' : ''}>Todas as Pastorais (Paroquial)</option>` : ''}
               ${managedPastorals
                 .map((p) => `<option value="${p.id}" ${existing?.pastoralId === p.id ? 'selected' : ''}>${escapeHtml(p.shortName)}</option>`)
+                .join('')}
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Local (Apenas Ativos) *</label>
+            <select name="locationId" required class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm outline-none focus:border-[#B45309]">
+              ${activeLocations
+                .map(
+                  (loc) => `<option value="${loc.id}" ${existing?.locationId === loc.id || (!existing?.locationId && existing?.location === loc.name) ? 'selected' : ''}>${escapeHtml(loc.name)}</option>`,
+                )
                 .join('')}
             </select>
           </div>
@@ -380,11 +404,6 @@ function openEventModal(existing, user, onSaved) {
             <input name="time" type="time" required value="${escapeHtml(existing?.time || '19:00')}"
               class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">
           </div>
-        </div>
-        <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Local *</label>
-          <input name="location" required value="${escapeHtml(existing?.location || 'Matriz Santa Teresa')}"
-            class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">
         </div>
         <div>
           <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Descrição</label>
@@ -405,10 +424,11 @@ function openEventModal(existing, user, onSaved) {
           id: existing?.id,
           title: String(fd.get('title')).trim(),
           type: fd.get('type'),
+          celebrationTypeId: fd.get('celebrationTypeId'),
           pastoralId: fd.get('pastoralId'),
           date: fd.get('date'),
           time: fd.get('time'),
-          location: String(fd.get('location')).trim(),
+          locationId: fd.get('locationId'),
           description: String(fd.get('description') || '').trim(),
         });
         closeModal();

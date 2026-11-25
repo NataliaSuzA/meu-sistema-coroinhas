@@ -1,12 +1,15 @@
 /**
- * Módulo 2: Escalas Multi-Pastoral com Isolamento Estrito + Aba Padrão "Minhas Datas"
- * - Aba padrão: "Minhas Datas" (reutiliza renderMyDatesContent com contagem regressiva)
- * - Usuário só visualiza escalas/abas das pastorais das quais faz parte (Membro ou Coordenador)
- * - Dentro das suas pastorais, vê a escala completa da equipe para saber com quem vai servir
- * - Respeita permissão dinâmica 'schedules_manage' da Matriz de Permissões
+ * Módulo 2: Escalas Multi-Pastoral v4
+ * - Dropdown de Locais Ativos e Tipos de Celebração Ativos
+ * - Filtro em cascata nas posições: Pastoral (coordenada) -> Função ativa -> Membro ativo
+ * - Preenchimento automático da Liturgia Diária + Oração Eucarística ao escolher a data
+ *   com selo "Padrão da Liturgia Diária" vs "Escolhida no Roteiro do Celebrante"
+ * - Campo "Roteiro / Orientações do Celebrante" + botão "Ver Liturgia Completa" nos cards
  */
 
 import { dataService } from '../services/dataService.js';
+import { liturgyService } from '../services/liturgyService.js';
+import { EUCHARISTIC_PRAYERS, getEucharisticPrayerById } from '../services/eucharisticPrayers.js';
 import { renderMyDatesContent } from './myDates.js';
 import {
   buildUserTimeSlotIndex,
@@ -30,28 +33,13 @@ import {
   showToast,
 } from '../utils/helpers.js';
 
-const CELEBRATION_TYPES = [
-  'Missa Dominical',
-  'Solenidade',
-  'Tríduo',
-  'Missa Semanal',
-  'Adoração ao Santíssimo',
-  'Celebração Especial',
-];
-
-const DEFAULT_LOCATIONS = [
-  'Matriz Santa Teresa',
-  'Igreja São Francisco',
-  'Capela Santa Teresinha',
-];
-
 let activeTab = 'my_dates';
 
 export function resetSchedulesTab() {
   activeTab = 'my_dates';
 }
 
-export function renderSchedules(container, { user, setHeaderContext, permissions }) {
+export function renderSchedules(container, { user, setHeaderContext, permissions, openLiturgyFor }) {
   const pastorals = dataService.getPastorals();
   const pastoralMap = Object.fromEntries(pastorals.map((p) => [p.id, p]));
   const coordPastoralIds = getCoordinatedPastoralIds(user, pastorals);
@@ -66,8 +54,10 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
     .sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`));
   const users = dataService.getUsers();
   const roles = dataService.getRoles();
+  const celebrationTypes = dataService.getCelebrationTypes();
   const userMap = Object.fromEntries(users.map((u) => [u.id, u]));
   const roleMap = Object.fromEntries(roles.map((r) => [r.id, r]));
+  const ctMap = Object.fromEntries(celebrationTypes.map((c) => [c.id, c]));
   const slotIndex = buildUserTimeSlotIndex(schedules);
 
   if (activeTab !== 'my_dates' && activeTab !== 'all_managed' && !accessiblePastoralIds.includes(activeTab)) {
@@ -123,7 +113,7 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
           </span>
           <h3 class="text-xl font-extrabold text-[#3E2723]">Escalas das Minhas Pastorais</h3>
           <p class="text-sm text-[#6D4C41] mt-0.5">
-            Você visualiza apenas as escalas das pastorais em que participa, com a equipe completa de cada celebração.
+            Escalas integradas aos Locais, Tipos de Celebração, Liturgia Diária e Roteiro do Celebrante.
           </p>
         </div>
 
@@ -155,7 +145,7 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
           : ''
       }
 
-      <!-- Abas Isoladas por Pastoral -->
+      <!-- Abas -->
       <div class="flex items-center gap-2 overflow-x-auto pb-1 custom-scrollbar">
         ${tabs
           .map((t) => {
@@ -202,7 +192,6 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
           .join('')}
       </div>
 
-      <!-- Conteúdo da Aba -->
       <div id="schedules-tab-body"></div>
     </div>
   `;
@@ -213,7 +202,8 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
     renderMyDatesContent(tabBody, {
       user,
       compactHeader: true,
-      onChanged: () => renderSchedules(container, { user, setHeaderContext, permissions }),
+      openLiturgyFor,
+      onChanged: () => renderSchedules(container, { user, setHeaderContext, permissions, openLiturgyFor }),
     });
   } else if (filtered.length === 0) {
     tabBody.innerHTML = `
@@ -226,7 +216,7 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
     tabBody.innerHTML = `
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
         ${filtered
-          .map((sch) => renderScheduleCard(sch, { user, canCreateEdit, userMap, roleMap, pastoralMap, slotIndex }))
+          .map((sch) => renderScheduleCard(sch, { user, canCreateEdit, userMap, roleMap, pastoralMap, ctMap, slotIndex }))
           .join('')}
       </div>
     `;
@@ -235,15 +225,21 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
   container.querySelectorAll('[data-tab]').forEach((btn) => {
     btn.addEventListener('click', () => {
       activeTab = btn.dataset.tab;
-      renderSchedules(container, { user, setHeaderContext, permissions });
+      renderSchedules(container, { user, setHeaderContext, permissions, openLiturgyFor });
     });
   });
 
   container.querySelector('#btn-new-schedule')?.addEventListener('click', () => {
     const defaultPastoralId = coordPastoralIds.includes(activeTab) ? activeTab : coordPastoralIds[0];
     openScheduleModal(null, { user, defaultPastoralId }, () =>
-      renderSchedules(container, { user, setHeaderContext, permissions }),
+      renderSchedules(container, { user, setHeaderContext, permissions, openLiturgyFor }),
     );
+  });
+
+  tabBody.querySelectorAll('[data-open-liturgy]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      openLiturgyFor?.(btn.dataset.litDate, btn.dataset.openLiturgy);
+    });
   });
 
   tabBody.querySelectorAll('[data-edit-schedule]').forEach((btn) => {
@@ -251,7 +247,7 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
       const sch = dataService.getScheduleById(btn.dataset.editSchedule);
       if (sch && canCreateEdit && canManageSchedule(user, sch)) {
         openScheduleModal(sch, { user, defaultPastoralId: sch.pastoralId }, () =>
-          renderSchedules(container, { user, setHeaderContext, permissions }),
+          renderSchedules(container, { user, setHeaderContext, permissions, openLiturgyFor }),
         );
       }
     });
@@ -261,17 +257,17 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
     btn.addEventListener('click', () => {
       const sch = dataService.getScheduleById(btn.dataset.deleteSchedule);
       if (!sch || !canCreateEdit || !canManageSchedule(user, sch)) return;
-      if (!confirm('Deseja realmente excluir esta escala? Ela também será removida da Agenda sincronizada.')) return;
+      if (!confirm('Deseja realmente excluir esta escala?')) return;
       dataService.deleteSchedule(sch.id);
       showToast('Escala excluída com sucesso.');
-      renderSchedules(container, { user, setHeaderContext, permissions });
+      renderSchedules(container, { user, setHeaderContext, permissions, openLiturgyFor });
     });
   });
 
   tabBody.querySelectorAll('[data-request-sub]').forEach((btn) => {
     btn.addEventListener('click', () => {
       openSubstitutionModal(btn.dataset.scheduleId, btn.dataset.requestSub, () =>
-        renderSchedules(container, { user, setHeaderContext, permissions }),
+        renderSchedules(container, { user, setHeaderContext, permissions, openLiturgyFor }),
       );
     });
   });
@@ -279,7 +275,7 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
   tabBody.querySelectorAll('[data-reassign]').forEach((btn) => {
     btn.addEventListener('click', () => {
       openReassignModal(btn.dataset.scheduleId, btn.dataset.reassign, user, () =>
-        renderSchedules(container, { user, setHeaderContext, permissions }),
+        renderSchedules(container, { user, setHeaderContext, permissions, openLiturgyFor }),
       );
     });
   });
@@ -287,12 +283,15 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
   refreshIcons();
 }
 
-function renderScheduleCard(sch, { user, canCreateEdit, userMap, roleMap, pastoralMap, slotIndex }) {
+function renderScheduleCard(sch, { user, canCreateEdit, userMap, roleMap, pastoralMap, ctMap, slotIndex }) {
   const isUserAssigned = (sch.assignments || []).some((a) => a.userId === user.id);
   const canEdit = canCreateEdit && canManageSchedule(user, sch);
   const countdown = getCountdownBadge(sch.date);
   const isPast = countdown.diffDays < 0;
   const mainPastoral = pastoralMap[sch.pastoralId];
+  const ctObj = ctMap[sch.celebrationTypeId];
+  const oe = getEucharisticPrayerById(sch.eucharisticPrayerId);
+  const hasSpecialScript = Boolean(sch.celebrantScript || sch.eucharisticPrayerSource === 'custom');
   const userHasConflictHere = isUserAssigned && hasTimeConflict(slotIndex, user.id, sch.date, sch.time);
 
   return `
@@ -305,7 +304,7 @@ function renderScheduleCard(sch, { user, canCreateEdit, userMap, roleMap, pastor
         }">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <div class="flex items-center gap-2 flex-wrap mb-1.5">
+              <div class="flex items-center gap-1.5 flex-wrap mb-1.5">
                 ${
                   isUserAssigned
                     ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-[#D97706] text-white shadow-xs">
@@ -318,8 +317,25 @@ function renderScheduleCard(sch, { user, canCreateEdit, userMap, roleMap, pastor
                 <span class="inline-flex px-2 py-0.5 rounded-full text-[11px] font-bold border ${countdown.cls}">
                   ${escapeHtml(countdown.label)}
                 </span>
+                ${
+                  hasSpecialScript
+                    ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#3E2723] text-amber-300">
+                        <i data-lucide="scroll-text" class="w-3 h-3"></i>
+                        Roteiro do Padre
+                      </span>`
+                    : ''
+                }
               </div>
-              <h4 class="text-base font-extrabold text-[#3E2723]">${escapeHtml(sch.celebrationType)}</h4>
+
+              <div class="flex items-center gap-2 flex-wrap">
+                <h4 class="text-base font-extrabold text-[#3E2723]">${escapeHtml(sch.celebrationType)}</h4>
+                ${
+                  ctObj
+                    ? `<span class="w-2.5 h-2.5 rounded-full" style="background-color:${escapeHtml(ctObj.color)};" title="${escapeHtml(ctObj.name)}"></span>`
+                    : ''
+                }
+              </div>
+
               <div class="flex items-center gap-3 flex-wrap text-xs text-[#5D4037] mt-1.5">
                 <span class="inline-flex items-center gap-1 font-semibold text-[#4E342E]">
                   <i data-lucide="calendar" class="w-3.5 h-3.5 text-[#B45309]"></i>
@@ -441,36 +457,50 @@ function renderScheduleCard(sch, { user, canCreateEdit, userMap, roleMap, pastor
         </div>
       </div>
 
-      ${
-        sch.notes
-          ? `
-        <div class="px-5 py-3 bg-[#FDFBF7] border-t border-[#E6DACE]/80 text-xs text-[#6D4C41] flex items-start gap-2">
-          <i data-lucide="info" class="w-3.5 h-3.5 text-[#8D6E63] shrink-0 mt-0.5"></i>
-          <span>${escapeHtml(sch.notes)}</span>
+      <!-- Rodapé Litúrgico + Botão Ver Liturgia Completa -->
+      <div class="px-5 py-3 bg-[#FDFBF7] border-t border-[#E6DACE]/80 space-y-2">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <span class="text-[11px] font-semibold text-[#5D4037]">
+            <strong>${escapeHtml(oe.shortName)}</strong>
+            <span class="text-[#8D6E63]">(${sch.eucharisticPrayerSource === 'custom' ? 'Roteiro do Celebrante' : 'Padrão do Dia'})</span>
+          </span>
+          <button type="button" data-open-liturgy="${sch.id}" data-lit-date="${escapeHtml(sch.date)}"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#3E2723] hover:bg-[#5D4037] text-amber-300 text-xs font-bold transition">
+            <i data-lucide="book-open" class="w-3.5 h-3.5"></i>
+            Ver Liturgia Completa
+          </button>
         </div>
-      `
-          : ''
-      }
+        ${
+          sch.notes
+            ? `<p class="text-xs text-[#6D4C41] flex items-start gap-1.5"><i data-lucide="info" class="w-3.5 h-3.5 text-[#8D6E63] shrink-0 mt-0.5"></i><span>${escapeHtml(sch.notes)}</span></p>`
+            : ''
+        }
+      </div>
     </article>
   `;
 }
 
 function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
-  const allPastorals = dataService.getActivePastorals();
-  const managedIds = new Set(getCoordinatedPastoralIds(user, allPastorals));
-  const managedPastorals = allPastorals.filter((p) => managedIds.has(p.id));
+  const allActivePastorals = dataService.getActivePastorals();
+  const managedIds = new Set(getCoordinatedPastoralIds(user, allActivePastorals));
+  const managedPastorals = allActivePastorals.filter((p) => managedIds.has(p.id));
+  const activeLocations = dataService.getActiveLocations();
+  const activeCelebrationTypes = dataService.getActiveCelebrationTypes();
 
   if (managedPastorals.length === 0) {
-    showToast('Você não possui pastorais sob sua coordenação para criar escalas.', 'error');
+    showToast('Você não possui pastorais ativas sob sua coordenação para criar escalas.', 'error');
     return;
   }
 
   const allSchedules = dataService.getSchedules();
-  const pastoralMap = Object.fromEntries(allPastorals.map((p) => [p.id, p]));
+  const pastoralMap = Object.fromEntries(allActivePastorals.map((p) => [p.id, p]));
   const roleMap = Object.fromEntries(dataService.getRoles().map((r) => [r.id, r]));
 
+  const initialOEId = existing?.eucharisticPrayerId || 'oe_2';
+  let oeSource = existing?.eucharisticPrayerSource || 'default';
+
   openModal({
-    title: existing ? 'Editar Escala' : 'Nova Escala Multi-Pastoral',
+    title: existing ? 'Editar Escala & Roteiro Litúrgico' : 'Nova Escala Multi-Pastoral',
     maxWidth: 'max-w-3xl',
     bodyHtml: `
       <form id="schedule-form" class="space-y-4">
@@ -489,28 +519,73 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
           <div>
-            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Local / Igreja *</label>
-            <input name="location" list="church-locations" required value="${escapeHtml(existing?.location || 'Matriz Santa Teresa')}"
-              class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">
-            <datalist id="church-locations">
-              ${DEFAULT_LOCATIONS.map((loc) => `<option value="${escapeHtml(loc)}"></option>`).join('')}
-            </datalist>
+            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Local (Apenas Ativos) *</label>
+            <select name="locationId" required class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm bg-white focus:border-[#B45309] outline-none">
+              ${activeLocations
+                .map(
+                  (loc) =>
+                    `<option value="${loc.id}" ${existing?.locationId === loc.id || (!existing?.locationId && existing?.location === loc.name) ? 'selected' : ''}>${escapeHtml(loc.name)} (${escapeHtml(loc.type)})</option>`,
+                )
+                .join('')}
+            </select>
           </div>
           <div>
             <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Tipo de Celebração *</label>
-            <select name="celebrationType" required class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm bg-white focus:border-[#B45309] outline-none">
-              ${CELEBRATION_TYPES.map((type) => `<option value="${escapeHtml(type)}" ${existing?.celebrationType === type ? 'selected' : ''}>${escapeHtml(type)}</option>`).join('')}
+            <select name="celebrationTypeId" required class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm bg-white focus:border-[#B45309] outline-none">
+              ${activeCelebrationTypes
+                .map(
+                  (ct) =>
+                    `<option value="${ct.id}" ${existing?.celebrationTypeId === ct.id || (!existing?.celebrationTypeId && existing?.celebrationType === ct.name) ? 'selected' : ''}>${escapeHtml(ct.name)} (${ct.durationMin} min)</option>`,
+                )
+                .join('')}
             </select>
+          </div>
+        </div>
+
+        <!-- Bloco Integrado: Liturgia do Dia + Oração Eucarística + Roteiro do Celebrante -->
+        <div class="p-4 rounded-2xl bg-[#FAF6F0] border border-[#E6DACE] space-y-3">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-2">
+              <i data-lucide="book-open" class="w-4 h-4 text-[#B45309]"></i>
+              <span class="text-xs font-extrabold uppercase tracking-wider text-[#3E2723]">Liturgia &amp; Roteiro do Celebrante</span>
+            </div>
+            <span id="sch-oe-badge" class="inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+              oeSource === 'custom'
+                ? 'bg-amber-100 text-[#92400E] border-amber-400'
+                : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+            }">
+              ${oeSource === 'custom' ? 'Escolhida no Roteiro do Celebrante' : 'Padrão da Liturgia Diária'}
+            </span>
+          </div>
+
+          <p id="sch-liturgy-preview" class="text-xs text-[#6D4C41] bg-white rounded-xl border border-[#E6DACE] px-3 py-2">
+            Consultando liturgia da data selecionada...
+          </p>
+
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Oração Eucarística</label>
+            <select id="sch-oe-select" name="eucharisticPrayerId" class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm font-medium outline-none focus:border-[#B45309]">
+              ${EUCHARISTIC_PRAYERS.map(
+                (oe) => `<option value="${oe.id}" ${initialOEId === oe.id ? 'selected' : ''}>${escapeHtml(oe.name)}</option>`,
+              ).join('')}
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Roteiro / Orientações do Celebrante</label>
+            <textarea name="celebrantScript" rows="2" placeholder="Ex: Entrada solene com incenso, bênção especial após a homilia, avisos no altar..."
+              class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm focus:border-[#B45309] outline-none">${escapeHtml(existing?.celebrantScript || '')}</textarea>
           </div>
         </div>
 
         <div id="schedule-conflict-banner" class="hidden rounded-xl bg-amber-50 border border-amber-300 p-3 text-xs text-amber-950 space-y-1"></div>
 
+        <!-- Vinculação Dinâmica em Cascata: Pastoral -> Função -> Membro -->
         <div class="pt-2 border-t border-[#E6DACE]/80">
           <div class="flex items-center justify-between gap-2 mb-2.5 flex-wrap">
             <div>
-              <label class="text-xs font-bold uppercase tracking-wider text-[#3E2723]">Posições da Escala</label>
-              <p class="text-[11px] text-[#6D4C41]">Escolha primeiro a <strong>Pastoral</strong>, depois a <strong>Função</strong> e o <strong>Membro ativo</strong>.</p>
+              <label class="text-xs font-bold uppercase tracking-wider text-[#3E2723]">Posições da Escala (Filtro Cascata)</label>
+              <p class="text-[11px] text-[#6D4C41]">1. <strong>Pastoral</strong> → 2. <strong>Função ativa</strong> da pastoral → 3. <strong>Membro ativo</strong> da pastoral.</p>
             </div>
             <button id="btn-add-position-row" type="button"
               class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 text-[#92400E] border border-amber-300 transition">
@@ -522,7 +597,7 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
         </div>
 
         <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Observações</label>
+          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Observações da Equipe</label>
           <textarea name="notes" rows="2" class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">${escapeHtml(existing?.notes || '')}</textarea>
         </div>
 
@@ -536,7 +611,39 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
       const listEl = bodyEl.querySelector('#positions-list');
       const dateInput = bodyEl.querySelector('#sch-date-input');
       const timeInput = bodyEl.querySelector('#sch-time-input');
+      const oeSelect = bodyEl.querySelector('#sch-oe-select');
+      const oeBadge = bodyEl.querySelector('#sch-oe-badge');
+      const litPreview = bodyEl.querySelector('#sch-liturgy-preview');
       const conflictBanner = bodyEl.querySelector('#schedule-conflict-banner');
+
+      function updateOEBadge() {
+        if (oeSource === 'custom') {
+          oeBadge.textContent = 'Escolhida no Roteiro do Celebrante';
+          oeBadge.className = 'inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold border bg-amber-100 text-[#92400E] border-amber-400';
+        } else {
+          oeBadge.textContent = 'Padrão da Liturgia Diária';
+          oeBadge.className = 'inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold border bg-emerald-50 text-emerald-800 border-emerald-200';
+        }
+      }
+
+      async function syncLiturgyForDate(isoDate, overwriteOE = true) {
+        if (!isoDate) return;
+        litPreview.textContent = `Carregando liturgia de ${formatDateBR(isoDate)}...`;
+        const lit = await liturgyService.fetchLiturgyByDate(isoDate);
+        litPreview.innerHTML = `<strong>${escapeHtml(lit.liturgiaTitle)}</strong> • Cor litúrgica: <strong>${escapeHtml(lit.liturgicalColor)}</strong>`;
+        if (overwriteOE) {
+          oeSelect.value = lit.defaultEucharisticPrayerId;
+          oeSource = 'default';
+          updateOEBadge();
+        }
+      }
+
+      oeSelect.addEventListener('change', () => {
+        oeSource = 'custom';
+        updateOEBadge();
+      });
+
+      syncLiturgyForDate(dateInput.value, !existing);
 
       function updateConflictWarnings() {
         const date = dateInput.value;
@@ -646,7 +753,10 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
         addPositionRow();
       }
 
-      dateInput.addEventListener('change', updateConflictWarnings);
+      dateInput.addEventListener('change', () => {
+        syncLiturgyForDate(dateInput.value, true);
+        updateConflictWarnings();
+      });
       timeInput.addEventListener('change', updateConflictWarnings);
       bodyEl.querySelector('#btn-add-position-row').addEventListener('click', () => addPositionRow());
       bodyEl.querySelector('#cancel-modal-btn').addEventListener('click', closeModal);
@@ -682,15 +792,18 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
           id: existing?.id,
           date: fd.get('date'),
           time: fd.get('time'),
-          location: String(fd.get('location')).trim(),
-          celebrationType: fd.get('celebrationType'),
+          locationId: fd.get('locationId'),
+          celebrationTypeId: fd.get('celebrationTypeId'),
           pastoralId: existing?.pastoralId || finalAssignments[0].pastoralId,
+          eucharisticPrayerId: fd.get('eucharisticPrayerId'),
+          eucharisticPrayerSource: oeSource,
+          celebrantScript: String(fd.get('celebrantScript') || '').trim(),
           notes: String(fd.get('notes') || '').trim(),
           assignments: finalAssignments,
         });
 
         closeModal();
-        showToast(existing ? 'Escala atualizada!' : 'Escala publicada e sincronizada com a Agenda!');
+        showToast(existing ? 'Escala e roteiro atualizados!' : 'Escala publicada e sincronizada com a Agenda e Liturgia!');
         onSaved();
       });
     },

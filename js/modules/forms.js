@@ -25,7 +25,13 @@ import {
   showToast,
 } from '../utils/helpers.js';
 
-export function renderForms(container, { user, navigate, permissions }) {
+let pendingFormToAutoOpen = null;
+
+export function queueAutoOpenForm(formId) {
+  pendingFormToAutoOpen = formId;
+}
+
+export function renderForms(container, { user, navigate, permissions, onNotificationsChanged }) {
   const generalAdmin = isGeneralAdmin(user);
   const canCreate = hasPermission(user, 'forms_manage', permissions);
   const canAnswer = hasPermission(user, 'forms_answer', permissions);
@@ -245,18 +251,41 @@ export function renderForms(container, { user, navigate, permissions }) {
   container.querySelectorAll('[data-answer-form]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const form = dataService.getForms().find((f) => f.id === btn.dataset.answerForm);
-      if (form) openAnswerFormModal(form, user, { readOnly: false }, () => renderForms(container, { user, navigate, permissions }));
+      if (form) {
+        openAnswerFormModal(form, user, { readOnly: false }, () => {
+          onNotificationsChanged?.();
+          renderForms(container, { user, navigate, permissions, onNotificationsChanged });
+        });
+      }
     });
   });
 
   container.querySelectorAll('[data-view-form]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const form = dataService.getForms().find((f) => f.id === btn.dataset.viewForm);
-      if (form) openAnswerFormModal(form, user, { readOnly: true }, () => renderForms(container, { user, navigate, permissions }));
+      if (form) {
+        openAnswerFormModal(form, user, { readOnly: true }, () => {
+          onNotificationsChanged?.();
+          renderForms(container, { user, navigate, permissions, onNotificationsChanged });
+        });
+      }
     });
   });
 
   refreshIcons();
+
+  // Abertura direta disparada por "Responder Agora" no Sino de Notificações ou Banner do Início
+  if (pendingFormToAutoOpen) {
+    const targetId = pendingFormToAutoOpen;
+    pendingFormToAutoOpen = null;
+    const targetForm = allForms.find((f) => f.id === targetId);
+    if (targetForm) {
+      openAnswerFormModal(targetForm, user, { readOnly: isFormClosed(targetForm) }, () => {
+        onNotificationsChanged?.();
+        renderForms(container, { user, navigate, permissions, onNotificationsChanged });
+      });
+    }
+  }
 }
 
 function openAnswerFormModal(form, user, { readOnly = false }, onSaved) {

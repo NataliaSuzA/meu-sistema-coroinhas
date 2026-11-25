@@ -1,8 +1,10 @@
 /**
- * Módulo 5: Pastorais & Funções
- * - Coordenação Geral (Admin Paroquial): cadastra/edita/exclui Pastorais (com cor própria
- *   e atribuição de coordenadores iniciais) e gerencia funções de qualquer pastoral.
- * - Coordenador de Pastoral: visualiza e gerencia funções APENAS das pastorais que coordena.
+ * Módulo 5: Pastorais & Funções (1:N)
+ * - Botão destacado "+ Nova Pastoral" exclusivo para Coordenação Geral:
+ *   criar, editar e ativar/inativar pastorais com Nome, Descrição/Carisma,
+ *   Cor da Tag/Badge e Coordenadores Responsáveis.
+ * - Funções obrigatoriamente vinculadas a uma Pastoral específica (pastoralId),
+ *   agrupadas dentro de cada pastoral. Coordenadores gerenciam apenas suas pastorais.
  */
 
 import { dataService } from '../services/dataService.js';
@@ -45,8 +47,8 @@ export function renderRoles(container, { user, onPastoralsChanged }) {
           <p class="text-sm text-[#6D4C41] mt-0.5">
             ${
               generalAdmin
-                ? 'Cadastre as pastorais da paróquia com cor própria, atribua coordenadores e configure as funções de cada equipe.'
-                : 'Gerencie as funções litúrgicas e ministeriais das pastorais sob sua coordenação.'
+                ? 'Cadastre e ative/inative pastorais (Catequese, Dízimo, Pascom, Pastoral Familiar...) e gerencie as funções vinculadas (1:N).'
+                : 'Gerencie as funções vinculadas às pastorais sob sua coordenação.'
             }
           </p>
         </div>
@@ -56,22 +58,22 @@ export function renderRoles(container, { user, onPastoralsChanged }) {
             generalAdmin
               ? `
             <button id="btn-new-pastoral" type="button"
-              class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#B45309] hover:bg-[#92400E] text-white text-sm font-semibold shadow-sm transition">
-              <i data-lucide="folder-plus" class="w-4 h-4"></i>
-              Nova Pastoral
+              class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#B45309] hover:bg-[#92400E] text-white text-sm font-extrabold shadow-sm transition">
+              <i data-lucide="plus-circle" class="w-4 h-4"></i>
+              + Nova Pastoral
             </button>
           `
               : `
             <span class="inline-flex items-center gap-1.5 text-xs font-semibold text-[#6D4C41] bg-[#F5EFE6] border border-[#E6DACE] px-3 py-2 rounded-xl">
               <i data-lucide="lock" class="w-3.5 h-3.5 text-[#B45309]"></i>
-              Criação de novas pastorais: apenas Coordenação Geral
+              Cadastro de novas pastorais: apenas Coordenação Geral
             </span>
           `
           }
         </div>
       </div>
 
-      <!-- Grade de Pastorais Gerenciadas -->
+      <!-- Grade de Pastorais -->
       <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         ${managedPastorals
           .map((p) => {
@@ -87,18 +89,46 @@ export function renderRoles(container, { user, onPastoralsChanged }) {
             return `
               <article data-select-pastoral="${p.id}"
                 class="cursor-pointer bg-white rounded-2xl border-2 p-4 flex flex-col justify-between gap-3 transition ${
-                  isSelected ? 'border-[#D97706] shadow-md bg-[#FDFBF7]' : 'border-[#E6DACE] hover:border-[#D7C4B2]'
-                }">
+                  !p.active ? 'opacity-70 bg-[#FAF6F0]/70 ' : ''
+                }${isSelected ? 'border-[#D97706] shadow-md bg-[#FDFBF7]' : 'border-[#E6DACE] hover:border-[#D7C4B2]'}">
                 <div>
                   <div class="flex items-start justify-between gap-2 mb-2">
                     <div class="flex items-center gap-2 min-w-0">
                       <span class="w-4 h-4 rounded-full shrink-0 shadow-xs" style="background-color:${escapeHtml(p.color)};"></span>
                       <h4 class="font-extrabold text-[#3E2723] text-sm truncate">${escapeHtml(p.name)}</h4>
                     </div>
-                    ${
-                      generalAdmin
-                        ? `
-                      <div class="flex items-center gap-0.5 shrink-0">
+                    <span class="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${
+                      p.active
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                        : 'bg-stone-100 text-stone-500 border-stone-200'
+                    }">
+                      ${p.active ? 'Ativa' : 'Inativa'}
+                    </span>
+                  </div>
+                  <p class="text-xs text-[#6D4C41] leading-relaxed">${escapeHtml(p.description || 'Sem descrição/carisma.')}</p>
+                </div>
+
+                <div class="pt-3 border-t border-[#E6DACE]/70 space-y-2 text-[11px] text-[#5D4037]">
+                  <div class="flex items-center justify-between">
+                    <span><strong>${roleCount}</strong> funções ativas</span>
+                    <span><strong>${memberCount}</strong> membros ativos</span>
+                  </div>
+                  <p class="truncate text-[#8D6E63]">
+                    Coord.: <strong class="text-[#4E342E]">${coords.length ? coords.map((c) => c.name.split(' ')[0]).join(', ') : 'Sem coordenador'}</strong>
+                  </p>
+                  ${
+                    generalAdmin
+                      ? `
+                    <div class="flex items-center justify-between pt-1.5 border-t border-[#E6DACE]/50">
+                      <button type="button" data-toggle-pastoral="${p.id}"
+                        class="text-[11px] font-bold px-2.5 py-1 rounded-lg border transition ${
+                          p.active
+                            ? 'text-[#92400E] bg-amber-50 hover:bg-amber-100 border-amber-200'
+                            : 'text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border-emerald-200'
+                        }">
+                        ${p.active ? 'Inativar' : 'Ativar'}
+                      </button>
+                      <div class="flex items-center gap-1">
                         <button type="button" data-edit-pastoral="${p.id}" title="Editar pastoral"
                           class="p-1.5 rounded-lg text-[#6D4C41] hover:text-[#3E2723] hover:bg-[#F5EFE6]">
                           <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
@@ -108,21 +138,10 @@ export function renderRoles(container, { user, onPastoralsChanged }) {
                           <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
                         </button>
                       </div>
-                    `
-                        : ''
-                    }
-                  </div>
-                  <p class="text-xs text-[#6D4C41] leading-relaxed">${escapeHtml(p.description || 'Sem descrição.')}</p>
-                </div>
-
-                <div class="pt-3 border-t border-[#E6DACE]/70 space-y-1.5 text-[11px] text-[#5D4037]">
-                  <div class="flex items-center justify-between">
-                    <span><strong>${roleCount}</strong> funções ativas</span>
-                    <span><strong>${memberCount}</strong> membros ativos</span>
-                  </div>
-                  <p class="truncate text-[#8D6E63]">
-                    Coord.: <strong class="text-[#4E342E]">${coords.length ? coords.map((c) => c.name.split(' ')[0]).join(', ') : 'Sem coordenador'}</strong>
-                  </p>
+                    </div>
+                  `
+                      : ''
+                  }
                 </div>
               </article>
             `;
@@ -130,7 +149,7 @@ export function renderRoles(container, { user, onPastoralsChanged }) {
           .join('')}
       </section>
 
-      <!-- Funções da Pastoral Selecionada -->
+      <!-- Funções Vinculadas (1:N) da Pastoral Selecionada -->
       ${
         activePastoral
           ? `
@@ -139,8 +158,8 @@ export function renderRoles(container, { user, onPastoralsChanged }) {
             <div class="flex items-center gap-3">
               <span class="w-4 h-4 rounded-full shrink-0" style="background-color:${escapeHtml(activePastoral.color)};"></span>
               <div>
-                <h4 class="text-base font-extrabold text-[#3E2723]">Funções — ${escapeHtml(activePastoral.name)}</h4>
-                <p class="text-xs text-[#6D4C41]">Apenas funções <strong>Ativas</strong> ficam disponíveis ao adicionar posições nas escalas desta pastoral.</p>
+                <h4 class="text-base font-extrabold text-[#3E2723]">Funções Vinculadas — ${escapeHtml(activePastoral.name)}</h4>
+                <p class="text-xs text-[#6D4C41]">Cada função pertence exclusivamente a uma pastoral e alimenta o filtro em cascata das escalas.</p>
               </div>
             </div>
             <button id="btn-new-role" type="button"
@@ -219,7 +238,6 @@ export function renderRoles(container, { user, onPastoralsChanged }) {
     </div>
   `;
 
-  // Selecionar card da pastoral
   container.querySelectorAll('[data-select-pastoral]').forEach((card) => {
     card.addEventListener('click', (e) => {
       if (e.target.closest('button')) return;
@@ -228,10 +246,20 @@ export function renderRoles(container, { user, onPastoralsChanged }) {
     });
   });
 
-  // Nova / Editar / Excluir Pastoral (Apenas Coordenação Geral)
   container.querySelector('#btn-new-pastoral')?.addEventListener('click', () => {
     openPastoralModal(null, (saved) => {
       selectedPastoralId = saved.id;
+      onPastoralsChanged?.();
+      renderRoles(container, { user, onPastoralsChanged });
+    });
+  });
+
+  container.querySelectorAll('[data-toggle-pastoral]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const p = dataService.getPastoralById(btn.dataset.togglePastoral);
+      if (!p) return;
+      dataService.savePastoral({ ...p, active: !p.active });
+      showToast(`Pastoral "${p.shortName}" marcada como ${!p.active ? 'Ativa' : 'Inativa'}.`);
       onPastoralsChanged?.();
       renderRoles(container, { user, onPastoralsChanged });
     });
@@ -259,10 +287,9 @@ export function renderRoles(container, { user, onPastoralsChanged }) {
     });
   });
 
-  // CRUD de Funções na Pastoral Selecionada
   container.querySelector('#btn-new-role')?.addEventListener('click', () => {
     if (!activePastoral || !canManagePastoral(user, activePastoral.id)) return;
-    openRoleModal(null, activePastoral, () => renderRoles(container, { user, onPastoralsChanged }));
+    openRoleModal(null, activePastoral, managedPastorals, () => renderRoles(container, { user, onPastoralsChanged }));
   });
 
   container.querySelectorAll('[data-toggle-role]').forEach((btn) => {
@@ -279,7 +306,7 @@ export function renderRoles(container, { user, onPastoralsChanged }) {
     btn.addEventListener('click', () => {
       const role = dataService.getRoleById(btn.dataset.editRole);
       if (role && canManagePastoral(user, role.pastoralId)) {
-        openRoleModal(role, activePastoral, () => renderRoles(container, { user, onPastoralsChanged }));
+        openRoleModal(role, activePastoral, managedPastorals, () => renderRoles(container, { user, onPastoralsChanged }));
       }
     });
   });
@@ -315,8 +342,8 @@ function openPastoralModal(existing, onSaved) {
       <form id="pastoral-form" class="space-y-4">
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
           <div>
-            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Nome Completo *</label>
-            <input name="name" required value="${escapeHtml(existing?.name || '')}" placeholder="Ex: Pastoral da Catequese"
+            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Nome da Pastoral *</label>
+            <input name="name" required value="${escapeHtml(existing?.name || '')}" placeholder="Ex: Pastoral da Catequese, Dízimo, Pascom..."
               class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">
           </div>
           <div>
@@ -327,28 +354,31 @@ function openPastoralModal(existing, onSaved) {
         </div>
 
         <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1.5">Cor de Identificação *</label>
+          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1.5">Cor da Tag / Badge *</label>
           <div class="flex items-center gap-3 flex-wrap">
             <input id="pastoral-color-input" name="color" type="color" value="${escapeHtml(existing?.color || '#B45309')}"
               class="w-11 h-10 rounded-lg border border-[#E6DACE] cursor-pointer p-0.5 bg-white">
             <div class="flex items-center gap-1.5 flex-wrap">
               ${COLOR_SWATCHES.map(
-                (hex) => `
-                <button type="button" data-swatch="${hex}" class="w-6 h-6 rounded-full border-2 border-white shadow-xs hover:scale-110 transition" style="background-color:${hex};" title="${hex}"></button>
-              `,
+                (hex) => `<button type="button" data-swatch="${hex}" class="w-6 h-6 rounded-full border-2 border-white shadow-xs hover:scale-110 transition" style="background-color:${hex};"></button>`,
               ).join('')}
             </div>
           </div>
         </div>
 
         <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Descrição</label>
-          <textarea name="description" rows="2" placeholder="Missão e atuação desta pastoral na paróquia..."
+          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Descrição / Carisma</label>
+          <textarea name="description" rows="2" placeholder="Carisma, missão e atuação desta pastoral na paróquia..."
             class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">${escapeHtml(existing?.description || '')}</textarea>
         </div>
 
+        <label class="inline-flex items-center gap-2 text-sm font-medium text-[#3E2723] cursor-pointer">
+          <input name="active" type="checkbox" ${(existing?.active ?? true) ? 'checked' : ''} class="rounded text-[#B45309]">
+          Pastoral ativa (disponível nas escalas)
+        </label>
+
         <div class="pt-2 border-t border-[#E6DACE]/80">
-          <label class="block text-xs font-bold uppercase tracking-wider text-[#3E2723] mb-1.5">Coordenadores desta Pastoral (opcional)</label>
+          <label class="block text-xs font-bold uppercase tracking-wider text-[#3E2723] mb-1.5">Coordenadores Responsáveis</label>
           <div class="max-h-40 overflow-y-auto custom-scrollbar space-y-1.5 p-2.5 rounded-xl bg-[#FAF6F0] border border-[#E6DACE]">
             ${activeUsers
               .map(
@@ -372,13 +402,10 @@ function openPastoralModal(existing, onSaved) {
     onMount(bodyEl) {
       const colorInput = bodyEl.querySelector('#pastoral-color-input');
       bodyEl.querySelectorAll('[data-swatch]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          colorInput.value = btn.dataset.swatch;
-        });
+        btn.addEventListener('click', () => { colorInput.value = btn.dataset.swatch; });
       });
 
       bodyEl.querySelector('#cancel-pastoral-btn').addEventListener('click', closeModal);
-
       bodyEl.querySelector('#pastoral-form').addEventListener('submit', (e) => {
         e.preventDefault();
         const fd = new FormData(e.target);
@@ -388,10 +415,9 @@ function openPastoralModal(existing, onSaved) {
           shortName: String(fd.get('shortName')).trim(),
           color: fd.get('color') || '#B45309',
           description: String(fd.get('description') || '').trim(),
-          active: true,
+          active: fd.get('active') === 'on',
         });
 
-        // Sincroniza coordenadores selecionados na pastoral
         const selectedCoordIds = new Set(fd.getAll('coordUserIds'));
         dataService.getUsers().forEach((u) => {
           if (u.isGeneralAdmin) return;
@@ -408,21 +434,31 @@ function openPastoralModal(existing, onSaved) {
         });
 
         closeModal();
-        showToast(existing ? 'Pastoral atualizada!' : `Pastoral "${saved.shortName}" criada!`);
+        showToast(existing ? 'Pastoral atualizada!' : `Pastoral "${saved.shortName}" criada com sucesso!`);
         onSaved(saved);
       });
     },
   });
 }
 
-function openRoleModal(existing, pastoral, onSaved) {
+function openRoleModal(existing, defaultPastoral, managedPastorals, onSaved) {
   openModal({
-    title: existing ? `Editar Função — ${pastoral.shortName}` : `Nova Função — ${pastoral.shortName}`,
+    title: existing ? 'Editar Função da Pastoral' : 'Nova Função Vinculada à Pastoral',
     bodyHtml: `
       <form id="role-form" class="space-y-4">
         <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Pastoral Vinculada (Obrigatório) *</label>
+          <select name="pastoralId" required class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm font-semibold text-[#3E2723] outline-none focus:border-[#B45309]">
+            ${managedPastorals
+              .map(
+                (p) => `<option value="${p.id}" ${(existing?.pastoralId || defaultPastoral?.id) === p.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`,
+              )
+              .join('')}
+          </select>
+        </div>
+        <div>
           <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Nome da Função *</label>
-          <input name="name" required value="${escapeHtml(existing?.name || '')}" placeholder="Ex: Salmista, Violão, Missal..."
+          <input name="name" required value="${escapeHtml(existing?.name || '')}" placeholder="Ex: Salmista, Violão, Missal, Fotografia..."
             class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">
         </div>
         <div>
@@ -432,7 +468,7 @@ function openRoleModal(existing, pastoral, onSaved) {
         </div>
         <label class="inline-flex items-center gap-2 text-sm font-medium text-[#3E2723] cursor-pointer">
           <input name="active" type="checkbox" ${(existing?.active ?? true) ? 'checked' : ''} class="rounded text-[#B45309]">
-          Função ativa (disponível nas escalas)
+          Função ativa (disponível no filtro em cascata das escalas)
         </label>
         <div class="flex justify-end gap-2 pt-2">
           <button type="button" id="cancel-role-btn" class="px-4 py-2 rounded-xl border border-[#E6DACE] text-sm font-semibold text-[#5D4037] hover:bg-[#FAF6F0]">Cancelar</button>
@@ -447,13 +483,13 @@ function openRoleModal(existing, pastoral, onSaved) {
         const fd = new FormData(e.target);
         dataService.saveRole({
           id: existing?.id,
-          pastoralId: pastoral.id,
+          pastoralId: fd.get('pastoralId'),
           name: String(fd.get('name')).trim(),
           description: String(fd.get('description') || '').trim(),
           active: fd.get('active') === 'on',
         });
         closeModal();
-        showToast(existing ? 'Função atualizada!' : 'Função adicionada à pastoral!');
+        showToast(existing ? 'Função atualizada!' : 'Função vinculada à pastoral!');
         onSaved();
       });
     },

@@ -23,7 +23,7 @@ import {
 
 let scopeFilter = 'upcoming'; // 'upcoming' | 'all'
 
-export function renderMyDatesContent(targetEl, { user, onChanged, compactHeader = false }) {
+export function renderMyDatesContent(targetEl, { user, onChanged, openLiturgyFor, compactHeader = false }) {
   const todayISO = getTodayISO();
   const pastorals = dataService.getPastorals();
   const pastoralMap = Object.fromEntries(pastorals.map((p) => [p.id, p]));
@@ -174,7 +174,12 @@ export function renderMyDatesContent(targetEl, { user, onChanged, compactHeader 
                     </div>
                   </div>
 
-                  <div class="flex items-center gap-2 shrink-0 self-end md:self-center">
+                  <div class="flex items-center gap-2 flex-wrap shrink-0 self-end md:self-center">
+                    <button type="button" data-md-liturgy="${sch.id}" data-md-date="${escapeHtml(sch.date)}"
+                      class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-[#3E2723] hover:bg-[#5D4037] text-amber-300 transition">
+                      <i data-lucide="book-open" class="w-3.5 h-3.5"></i>
+                      Ver Liturgia Completa
+                    </button>
                     ${
                       !isPast && !asg.substitutionRequested
                         ? `<button type="button" data-md-sub="${asg.id}" data-md-sch="${sch.id}"
@@ -198,7 +203,13 @@ export function renderMyDatesContent(targetEl, { user, onChanged, compactHeader 
   targetEl.querySelectorAll('[data-mydates-scope]').forEach((btn) => {
     btn.addEventListener('click', () => {
       scopeFilter = btn.dataset.mydatesScope;
-      renderMyDatesContent(targetEl, { user, onChanged, compactHeader });
+      renderMyDatesContent(targetEl, { user, onChanged, openLiturgyFor, compactHeader });
+    });
+  });
+
+  targetEl.querySelectorAll('[data-md-liturgy]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      openLiturgyFor?.(btn.dataset.mdDate, btn.dataset.mdLiturgy);
     });
   });
 
@@ -206,7 +217,7 @@ export function renderMyDatesContent(targetEl, { user, onChanged, compactHeader 
     btn.addEventListener('click', () => {
       openQuickSubModal(btn.dataset.mdSch, btn.dataset.mdSub, () => {
         if (onChanged) onChanged();
-        else renderMyDatesContent(targetEl, { user, onChanged, compactHeader });
+        else renderMyDatesContent(targetEl, { user, onChanged, openLiturgyFor, compactHeader });
       });
     });
   });
@@ -214,9 +225,9 @@ export function renderMyDatesContent(targetEl, { user, onChanged, compactHeader 
   refreshIcons();
 }
 
-export function renderMyDates(container, { user, setHeaderContext }) {
+export function renderMyDates(container, { user, setHeaderContext, openLiturgyFor }) {
   setHeaderContext?.('Minhas Datas', 'Seus compromissos pessoais em ordem cronológica');
-  renderMyDatesContent(container, { user, compactHeader: false });
+  renderMyDatesContent(container, { user, openLiturgyFor, compactHeader: false });
 }
 
 function openQuickSubModal(scheduleId, assignmentId, onDone) {

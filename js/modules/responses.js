@@ -1,15 +1,15 @@
 /**
- * Módulo 8: Respostas de Formulários (Validação + Relatório de Adesão e Pendentes)
- * - Resumo numérico no topo (ex: "2 de 6 membros responderam — 33%")
- * - Aba "Responderam": lista envios, status, botão "Validar Resposta" e "Exportar CSV/Excel"
- * - Aba "Pendentes (Não Responderam)": cruza automaticamente membros ativos das pastorais
- *   de destino vs quem não respondeu, com botão de copiar lista e lembrete no WhatsApp.
+ * Módulo 8: Respostas & Adesão de Formulários + Lembrete Interno no Sistema
+ * - Aba "Responderam": lista envios, validação e exportação CSV/Excel
+ * - Aba "Pendentes (Não Responderam)":
+ *   * Botão "Enviar Lembrete" individual dispara notificação interna In-App
+ *   * Botão no topo "Enviar Lembrete para Todos os Pendentes"
+ *   * Status atualizado para "Lembrete enviado (data/hora)" com opção de reenviar
  */
 
 import { dataService } from '../services/dataService.js';
 import {
   canManageAnyOfPastorals,
-  cleanPhoneForWhatsApp,
   escapeHtml,
   exportToCSV,
   formatDateTimeBR,
@@ -24,9 +24,9 @@ import {
 } from '../utils/helpers.js';
 
 let selectedFormId = null;
-let activeSubTab = 'answered'; // 'answered' | 'pending'
+let activeSubTab = 'answered';
 
-export function renderResponses(container, { user }) {
+export function renderResponses(container, { user, onNotificationsChanged }) {
   const generalAdmin = isGeneralAdmin(user);
   const pastorals = dataService.getPastorals();
   const pastoralMap = Object.fromEntries(pastorals.map((p) => [p.id, p]));
@@ -58,7 +58,7 @@ export function renderResponses(container, { user }) {
         <div>
           <h3 class="text-xl font-extrabold text-[#3E2723]">Respostas &amp; Adesão de Formulários</h3>
           <p class="text-sm text-[#6D4C41] mt-0.5">
-            Valide envios para travar edições, acompanhe pendentes e exporte planilhas em CSV/Excel.
+            Valide envios, dispare lembretes internos no sistema para pendentes e exporte CSV/Excel.
           </p>
         </div>
 
@@ -83,7 +83,6 @@ export function renderResponses(container, { user }) {
         </div>
       `
           : `
-        <!-- Seletor de Formulário + Resumo de Adesão -->
         <div class="bg-white rounded-2xl border border-[#E6DACE] p-5 space-y-4 shadow-xs">
           <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div class="flex-1">
@@ -108,7 +107,6 @@ export function renderResponses(container, { user }) {
             </div>
           </div>
 
-          <!-- Resumo Numérico de Adesão -->
           <div class="p-4 rounded-2xl bg-[#FAF6F0] border border-[#E6DACE] space-y-2.5">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <p class="text-sm font-extrabold text-[#3E2723]">
@@ -128,9 +126,9 @@ export function renderResponses(container, { user }) {
           </div>
         </div>
 
-        <!-- Abas: Responderam / Pendentes -->
+        <!-- Abas + Botões em Lote -->
         <div class="flex items-center justify-between gap-3 flex-wrap">
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-wrap">
             <button type="button" data-resp-tab="answered"
               class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold border transition ${
                 activeSubTab === 'answered'
@@ -154,11 +152,18 @@ export function renderResponses(container, { user }) {
           ${
             activeSubTab === 'pending' && pendingMembers.length > 0
               ? `
-            <button id="btn-copy-pending" type="button"
-              class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-[#92400E] border border-amber-300 text-xs font-bold transition">
-              <i data-lucide="copy" class="w-3.5 h-3.5"></i>
-              Copiar Lista de Pendentes
-            </button>
+            <div class="flex items-center gap-2 flex-wrap">
+              <button id="btn-remind-all" type="button"
+                class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#B45309] hover:bg-[#92400E] text-white text-xs font-extrabold shadow-xs transition">
+                <i data-lucide="bell-ring" class="w-3.5 h-3.5"></i>
+                Enviar Lembrete para Todos os Pendentes
+              </button>
+              <button id="btn-copy-pending" type="button"
+                class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-[#FAF6F0] text-[#5D4037] border border-[#E6DACE] text-xs font-bold transition">
+                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                Copiar Lista
+              </button>
+            </div>
           `
               : ''
           }
@@ -176,13 +181,13 @@ export function renderResponses(container, { user }) {
 
   container.querySelector('#responses-form-select')?.addEventListener('change', (e) => {
     selectedFormId = e.target.value;
-    renderResponses(container, { user });
+    renderResponses(container, { user, onNotificationsChanged });
   });
 
   container.querySelectorAll('[data-resp-tab]').forEach((btn) => {
     btn.addEventListener('click', () => {
       activeSubTab = btn.dataset.respTab;
-      renderResponses(container, { user });
+      renderResponses(container, { user, onNotificationsChanged });
     });
   });
 
@@ -190,8 +195,40 @@ export function renderResponses(container, { user }) {
     btn.addEventListener('click', () => {
       dataService.validateResponse(btn.dataset.validateResp, user.id);
       showToast('Resposta validada pela Coordenação! Edição bloqueada para o membro.');
-      renderResponses(container, { user });
+      renderResponses(container, { user, onNotificationsChanged });
     });
+  });
+
+  // Lembrete interno individual
+  container.querySelectorAll('[data-send-reminder]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (!activeForm) return;
+      const recipientId = btn.dataset.sendReminder;
+      const member = userMap[recipientId];
+      dataService.sendFormReminder({
+        form: activeForm,
+        recipientUserId: recipientId,
+        senderUserId: user.id,
+      });
+      showToast(`Lembrete interno enviado no sistema para ${member?.name || 'o membro'}!`);
+      onNotificationsChanged?.();
+      renderResponses(container, { user, onNotificationsChanged });
+    });
+  });
+
+  // Lembrete interno para todos os pendentes
+  container.querySelector('#btn-remind-all')?.addEventListener('click', () => {
+    if (!activeForm || pendingMembers.length === 0) return;
+    pendingMembers.forEach((m) => {
+      dataService.sendFormReminder({
+        form: activeForm,
+        recipientUserId: m.id,
+        senderUserId: user.id,
+      });
+    });
+    showToast(`Lembretes internos enviados para todos os ${pendingMembers.length} membros pendentes!`);
+    onNotificationsChanged?.();
+    renderResponses(container, { user, onNotificationsChanged });
   });
 
   container.querySelector('#btn-copy-pending')?.addEventListener('click', async () => {
@@ -202,14 +239,14 @@ export function renderResponses(container, { user }) {
           .map((x) => pastoralMap[x.pastoralId]?.shortName)
           .filter(Boolean)
           .join(', ');
-        return `• ${m.name} (${pList}) - ${m.phone || 'Sem WhatsApp'}`;
+        return `• ${m.name} (${pList}) - ${m.phone || 'Sem telefone'}`;
       }),
     ];
     try {
       await navigator.clipboard.writeText(lines.join('\n'));
-      showToast('Lista de pendentes copiada para a área de transferência!');
+      showToast('Lista de pendentes copiada!');
     } catch {
-      showToast('Não foi possível copiar automaticamente; use os botões de WhatsApp abaixo.', 'info');
+      showToast('Use os botões de Lembrete Interno para notificar diretamente no sistema.', 'info');
     }
   });
 
@@ -260,7 +297,7 @@ function renderAnsweredTab(activeForm, formResponses, userMap, pastoralMap) {
       <div class="bg-white rounded-2xl border border-dashed border-[#D7C4B2] p-10 text-center">
         <i data-lucide="inbox" class="w-10 h-10 text-[#8D6E63] mx-auto mb-3"></i>
         <h4 class="text-base font-bold text-[#3E2723]">Ainda não há respostas enviadas</h4>
-        <p class="text-sm text-[#6D4C41] mt-1">Consulte a aba "Pendentes" para enviar um lembrete aos membros.</p>
+        <p class="text-sm text-[#6D4C41] mt-1">Consulte a aba "Pendentes" para enviar um lembrete interno no sistema.</p>
       </div>
     `;
   }
@@ -273,9 +310,7 @@ function renderAnsweredTab(activeForm, formResponses, userMap, pastoralMap) {
             <tr class="bg-[#FDFBF7] border-b border-[#E6DACE] text-[11px] font-bold uppercase tracking-wider text-[#6D4C41]">
               <th class="px-5 py-3.5 whitespace-nowrap">Membro</th>
               <th class="px-4 py-3.5 whitespace-nowrap">Status &amp; Envio</th>
-              ${activeForm.questions
-                .map((q) => `<th class="px-4 py-3.5 min-w-[190px]">${escapeHtml(q.text)}</th>`)
-                .join('')}
+              ${activeForm.questions.map((q) => `<th class="px-4 py-3.5 min-w-[190px]">${escapeHtml(q.text)}</th>`).join('')}
               <th class="px-5 py-3.5 text-right whitespace-nowrap">Ação</th>
             </tr>
           </thead>
@@ -307,9 +342,7 @@ function renderAnsweredTab(activeForm, formResponses, userMap, pastoralMap) {
                       <p class="text-[11px] text-[#8D6E63]">${escapeHtml(formatDateTimeBR(resp.submittedAt))}</p>
                     </td>
                     ${activeForm.questions
-                      .map(
-                        (q) => `<td class="px-4 py-3.5 text-xs text-[#4E342E] leading-relaxed">${escapeHtml(resp.answers?.[q.id] || '—')}</td>`,
-                      )
+                      .map((q) => `<td class="px-4 py-3.5 text-xs text-[#4E342E] leading-relaxed">${escapeHtml(resp.answers?.[q.id] || '—')}</td>`)
                       .join('')}
                     <td class="px-5 py-3.5 text-right whitespace-nowrap">
                       ${
@@ -352,40 +385,46 @@ function renderPendingTab(activeForm, pendingMembers, pastoralMap) {
             <tr class="bg-[#FDFBF7] border-b border-[#E6DACE] text-[11px] font-bold uppercase tracking-wider text-[#6D4C41]">
               <th class="px-5 py-3.5">Membro Pendente</th>
               <th class="px-4 py-3.5">Pastorais</th>
-              <th class="px-4 py-3.5">WhatsApp</th>
-              <th class="px-5 py-3.5 text-right">Lembrete</th>
+              <th class="px-4 py-3.5">Status do Lembrete Interno</th>
+              <th class="px-5 py-3.5 text-right">Notificação no Sistema</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-[#E6DACE]/60 text-sm">
             ${pendingMembers
               .map((m) => {
-                const wa = cleanPhoneForWhatsApp(m.phone);
-                const msg = encodeURIComponent(
-                  `Paz e bem, ${m.name}! Lembrete carinhoso da Paróquia Santa Teresa d'Ávila: ainda não recebemos sua resposta no formulário "${activeForm.title}". Quando puder, preencha no portal!`,
-                );
                 const mems = getUserMemberships(m);
+                const latestReminder = dataService.getLatestFormReminder(activeForm.id, m.id);
                 return `
                   <tr class="hover:bg-[#FAF6F0]/70">
                     <td class="px-5 py-3.5">
                       <p class="font-bold text-[#3E2723]">${escapeHtml(m.name)}</p>
-                      <p class="text-xs text-[#8D6E63]">${escapeHtml(m.email)}</p>
+                      <p class="text-xs text-[#8D6E63]">${escapeHtml(m.phone || m.email)}</p>
                     </td>
                     <td class="px-4 py-3.5">
                       <div class="flex items-center gap-1 flex-wrap">
                         ${mems.map((x) => renderPastoralPill(pastoralMap[x.pastoralId], { compact: true })).join('')}
                       </div>
                     </td>
-                    <td class="px-4 py-3.5 text-xs text-[#5D4037] whitespace-nowrap">${escapeHtml(m.phone || '—')}</td>
-                    <td class="px-5 py-3.5 text-right whitespace-nowrap">
+                    <td class="px-4 py-3.5 whitespace-nowrap">
                       ${
-                        wa
-                          ? `<a href="https://wa.me/${wa}?text=${msg}" target="_blank" rel="noopener noreferrer"
-                              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold transition">
-                              <i data-lucide="message-circle" class="w-3.5 h-3.5"></i>
-                              Enviar Lembrete
-                            </a>`
-                          : '<span class="text-xs text-[#8D6E63]">Sem telefone</span>'
+                        latestReminder
+                          ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-[#92400E] border border-amber-300">
+                              <i data-lucide="bell-check" class="w-3.5 h-3.5 text-[#B45309]"></i>
+                              Lembrete enviado (${escapeHtml(formatDateTimeBR(latestReminder.createdAt))})
+                            </span>`
+                          : `<span class="text-xs text-[#8D6E63] italic">Nenhum lembrete enviado ainda</span>`
                       }
+                    </td>
+                    <td class="px-5 py-3.5 text-right whitespace-nowrap">
+                      <button type="button" data-send-reminder="${m.id}"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                          latestReminder
+                            ? 'bg-[#F5EFE6] hover:bg-amber-100 text-[#4E342E] border border-[#D7C4B2]'
+                            : 'bg-[#3E2723] hover:bg-[#5D4037] text-white'
+                        }">
+                        <i data-lucide="bell" class="w-3.5 h-3.5 ${latestReminder ? 'text-[#B45309]' : 'text-amber-400'}"></i>
+                        ${latestReminder ? 'Reenviar Lembrete' : 'Enviar Lembrete'}
+                      </button>
                     </td>
                   </tr>
                 `;

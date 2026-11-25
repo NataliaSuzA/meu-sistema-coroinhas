@@ -1,6 +1,6 @@
 /**
- * Serviço de domínio v3 (Multi-Pastoral, Permissões, Perfil, Mural de Parabéns,
- * Formulários com Prazo/Validação e Segmentação N:N de Notas e Avisos).
+ * Serviço de domínio v4 — Multi-Pastoral, Locais, Tipos de Celebração,
+ * Lembretes Internos (Notificações In-App), Liturgia/Roteiro e Permissões.
  */
 
 import { storageAdapter, COLLECTIONS } from './storage.js';
@@ -20,6 +20,8 @@ export const dataService = {
   resetToDemoData() {
     const seed = buildSeedData();
     storageAdapter.saveCollection(COLLECTIONS.PASTORALS, seed.pastorals);
+    storageAdapter.saveCollection(COLLECTIONS.LOCATIONS, seed.locations);
+    storageAdapter.saveCollection(COLLECTIONS.CELEBRATION_TYPES, seed.celebrationTypes);
     storageAdapter.saveCollection(COLLECTIONS.USERS, seed.users);
     storageAdapter.saveCollection(COLLECTIONS.ROLES, seed.roles);
     storageAdapter.saveCollection(COLLECTIONS.SCHEDULES, seed.schedules);
@@ -28,6 +30,7 @@ export const dataService = {
     storageAdapter.saveCollection(COLLECTIONS.FORMS, seed.forms);
     storageAdapter.saveCollection(COLLECTIONS.RESPONSES, seed.responses);
     storageAdapter.saveCollection(COLLECTIONS.NOTICES, seed.notices);
+    storageAdapter.saveCollection(COLLECTIONS.NOTIFICATIONS, seed.notifications);
     storageAdapter.saveDocument(COLLECTIONS.ATTENDANCE, seed.attendance);
     storageAdapter.saveDocument(COLLECTIONS.PERMISSIONS, seed.permissions);
     storageAdapter.saveCollection(COLLECTIONS.BIRTHDAY_MESSAGES, seed.birthdayMessages);
@@ -45,7 +48,7 @@ export const dataService = {
     storageAdapter.saveDocument(COLLECTIONS.SESSION, userId ? { userId } : null);
   },
 
-  // --- Permissões Dinâmicas ---
+  // --- Permissões ---
   getPermissions() {
     const defaults = buildDefaultPermissions();
     const saved = storageAdapter.getDocument(COLLECTIONS.PERMISSIONS, null);
@@ -116,6 +119,66 @@ export const dataService = {
       memberships: (u.memberships || []).filter((m) => m.pastoralId !== id),
     }));
     storageAdapter.saveCollection(COLLECTIONS.USERS, updatedUsers);
+  },
+
+  // --- Locais ---
+  getLocations() {
+    return storageAdapter.getCollection(COLLECTIONS.LOCATIONS, []);
+  },
+
+  getActiveLocations() {
+    return this.getLocations().filter((l) => l.active);
+  },
+
+  getLocationById(id) {
+    return this.getLocations().find((l) => l.id === id) || null;
+  },
+
+  saveLocation(location) {
+    const list = this.getLocations();
+    if (location.id) {
+      const idx = list.findIndex((l) => l.id === location.id);
+      if (idx >= 0) list[idx] = { ...list[idx], ...location };
+    } else {
+      location = { ...location, id: genId('loc') };
+      list.push(location);
+    }
+    storageAdapter.saveCollection(COLLECTIONS.LOCATIONS, list);
+    return location;
+  },
+
+  deleteLocation(id) {
+    storageAdapter.saveCollection(COLLECTIONS.LOCATIONS, this.getLocations().filter((l) => l.id !== id));
+  },
+
+  // --- Tipos de Celebração ---
+  getCelebrationTypes() {
+    return storageAdapter.getCollection(COLLECTIONS.CELEBRATION_TYPES, []);
+  },
+
+  getActiveCelebrationTypes() {
+    return this.getCelebrationTypes().filter((c) => c.active);
+  },
+
+  getCelebrationTypeById(id) {
+    return this.getCelebrationTypes().find((c) => c.id === id) || null;
+  },
+
+  saveCelebrationType(item) {
+    const list = this.getCelebrationTypes();
+    if (item.id) {
+      const idx = list.findIndex((c) => c.id === item.id);
+      if (idx >= 0) list[idx] = { ...list[idx], ...item };
+    } else {
+      item = { ...item, id: genId('ct') };
+      list.push(item);
+    }
+    storageAdapter.saveCollection(COLLECTIONS.CELEBRATION_TYPES, list);
+    return item;
+  },
+
+  deleteCelebrationType(id) {
+    storageAdapter.saveCollection(COLLECTIONS.CELEBRATION_TYPES, this.getCelebrationTypes().filter((c) => c.id !== id));
   },
 
   // --- Usuários & Meu Perfil ---
@@ -250,17 +313,29 @@ export const dataService = {
     const distinctPastorals = Array.from(new Set(normalizedAssignments.map((a) => a.pastoralId).filter(Boolean)));
     const derivedPastoralId = schedule.pastoralId || distinctPastorals[0] || 'pas_coroinhas';
 
+    const locObj = schedule.locationId ? this.getLocationById(schedule.locationId) : null;
+    const ctObj = schedule.celebrationTypeId ? this.getCelebrationTypeById(schedule.celebrationTypeId) : null;
+
+    const enriched = {
+      ...schedule,
+      location: locObj ? locObj.name : schedule.location,
+      celebrationType: ctObj ? ctObj.name : schedule.celebrationType,
+      pastoralId: derivedPastoralId,
+      eucharisticPrayerId: schedule.eucharisticPrayerId || 'oe_2',
+      eucharisticPrayerSource: schedule.eucharisticPrayerSource || 'default',
+      celebrantScript: String(schedule.celebrantScript || '').trim(),
+      assignments: normalizedAssignments,
+    };
+
     if (schedule.id) {
       const idx = list.findIndex((s) => s.id === schedule.id);
-      if (idx >= 0) {
-        list[idx] = { ...list[idx], ...schedule, pastoralId: derivedPastoralId, assignments: normalizedAssignments };
-      }
+      if (idx >= 0) list[idx] = { ...list[idx], ...enriched };
     } else {
-      schedule = { ...schedule, id: genId('sch'), pastoralId: derivedPastoralId, assignments: normalizedAssignments };
-      list.push(schedule);
+      enriched.id = genId('sch');
+      list.push(enriched);
     }
     storageAdapter.saveCollection(COLLECTIONS.SCHEDULES, list);
-    return schedule;
+    return enriched;
   },
 
   deleteSchedule(id) {
@@ -299,22 +374,29 @@ export const dataService = {
 
   saveEvent(evt) {
     const list = this.getEvents();
+    const locObj = evt.locationId ? this.getLocationById(evt.locationId) : null;
+    const ctObj = evt.celebrationTypeId ? this.getCelebrationTypeById(evt.celebrationTypeId) : null;
+    const enriched = {
+      ...evt,
+      location: locObj ? locObj.name : evt.location,
+      celebrationType: ctObj ? ctObj.name : evt.celebrationType || '',
+    };
     if (evt.id) {
       const idx = list.findIndex((e) => e.id === evt.id);
-      if (idx >= 0) list[idx] = { ...list[idx], ...evt };
+      if (idx >= 0) list[idx] = { ...list[idx], ...enriched };
     } else {
-      evt = { ...evt, id: genId('evt') };
-      list.push(evt);
+      enriched.id = genId('evt');
+      list.push(enriched);
     }
     storageAdapter.saveCollection(COLLECTIONS.EVENTS, list);
-    return evt;
+    return enriched;
   },
 
   deleteEvent(id) {
     storageAdapter.saveCollection(COLLECTIONS.EVENTS, this.getEvents().filter((e) => e.id !== id));
   },
 
-  // --- Bloco de Notas (N:N pastoralIds) ---
+  // --- Bloco de Notas ---
   getNotes() {
     return storageAdapter.getCollection(COLLECTIONS.NOTES, []);
   },
@@ -337,7 +419,7 @@ export const dataService = {
     storageAdapter.saveCollection(COLLECTIONS.NOTES, this.getNotes().filter((n) => n.id !== id));
   },
 
-  // --- Formulários (N:N pastoralIds + deadline) e Respostas (validação) ---
+  // --- Formulários & Respostas ---
   getForms() {
     return storageAdapter.getCollection(COLLECTIONS.FORMS, []);
   },
@@ -366,6 +448,7 @@ export const dataService = {
   deleteForm(id) {
     storageAdapter.saveCollection(COLLECTIONS.FORMS, this.getForms().filter((f) => f.id !== id));
     storageAdapter.saveCollection(COLLECTIONS.RESPONSES, this.getResponses().filter((r) => r.formId !== id));
+    storageAdapter.saveCollection(COLLECTIONS.NOTIFICATIONS, this.getNotifications().filter((n) => n.formId !== id));
   },
 
   getResponses() {
@@ -388,12 +471,13 @@ export const dataService = {
       validatedBy: null,
       validatedAt: null,
     };
-    if (existingIdx >= 0) {
-      list[existingIdx] = payload;
-    } else {
-      list.unshift(payload);
-    }
+    if (existingIdx >= 0) list[existingIdx] = payload;
+    else list.unshift(payload);
     storageAdapter.saveCollection(COLLECTIONS.RESPONSES, list);
+
+    // Marca lembretes pendentes deste formulário para este usuário como concluídos automaticamente
+    this.completeFormRemindersForUser(response.formId, response.userId);
+
     return { ok: true, response: payload };
   },
 
@@ -408,7 +492,89 @@ export const dataService = {
     return target;
   },
 
-  // --- Avisos (N:N pastoralIds) ---
+  // --- Notificações Internas (Lembretes In-App) ---
+  getNotifications() {
+    return storageAdapter.getCollection(COLLECTIONS.NOTIFICATIONS, []);
+  },
+
+  getNotificationsForUser(userId) {
+    return this.getNotifications()
+      .filter((n) => n.recipientUserId === userId)
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  },
+
+  getLatestFormReminder(formId, recipientUserId) {
+    return (
+      this.getNotifications()
+        .filter((n) => n.type === 'form_reminder' && n.formId === formId && n.recipientUserId === recipientUserId)
+        .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0] || null
+    );
+  },
+
+  sendFormReminder({ form, recipientUserId, senderUserId }) {
+    const list = this.getNotifications();
+    const nowISO = new Date().toISOString();
+    const existing = list.find(
+      (n) => n.type === 'form_reminder' && n.formId === form.id && n.recipientUserId === recipientUserId && !n.completed,
+    );
+    const message = `A Coordenação enviou um lembrete: responda ao formulário '${form.title}' antes do prazo.`;
+    if (existing) {
+      existing.senderUserId = senderUserId;
+      existing.message = message;
+      existing.createdAt = nowISO;
+      existing.read = false;
+      existing.completed = false;
+      storageAdapter.saveCollection(COLLECTIONS.NOTIFICATIONS, list);
+      return existing;
+    }
+    const item = {
+      id: genId('notif'),
+      type: 'form_reminder',
+      recipientUserId,
+      senderUserId,
+      formId: form.id,
+      title: 'Lembrete de Formulário Pendente',
+      message,
+      createdAt: nowISO,
+      read: false,
+      completed: false,
+    };
+    list.unshift(item);
+    storageAdapter.saveCollection(COLLECTIONS.NOTIFICATIONS, list);
+    return item;
+  },
+
+  markNotificationRead(notificationId) {
+    const list = this.getNotifications();
+    const n = list.find((x) => x.id === notificationId);
+    if (n) {
+      n.read = true;
+      storageAdapter.saveCollection(COLLECTIONS.NOTIFICATIONS, list);
+    }
+  },
+
+  markAllNotificationsReadForUser(userId) {
+    const list = this.getNotifications();
+    list.forEach((n) => {
+      if (n.recipientUserId === userId) n.read = true;
+    });
+    storageAdapter.saveCollection(COLLECTIONS.NOTIFICATIONS, list);
+  },
+
+  completeFormRemindersForUser(formId, userId) {
+    const list = this.getNotifications();
+    let changed = false;
+    list.forEach((n) => {
+      if (n.type === 'form_reminder' && n.formId === formId && n.recipientUserId === userId) {
+        n.completed = true;
+        n.read = true;
+        changed = true;
+      }
+    });
+    if (changed) storageAdapter.saveCollection(COLLECTIONS.NOTIFICATIONS, list);
+  },
+
+  // --- Avisos ---
   getNotices() {
     return storageAdapter.getCollection(COLLECTIONS.NOTICES, []);
   },

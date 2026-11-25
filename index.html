@@ -243,6 +243,20 @@
               </select>
             </div>
 
+            <!-- Sino de Notificações Internas -->
+            <div class="relative">
+              <button id="notifications-bell-btn" type="button" title="Central de Notificações"
+                class="relative p-2 rounded-xl bg-[#F5EFE6] hover:bg-amber-50 text-[#4E342E] border border-[#E6DACE] hover:border-amber-400 transition">
+                <i data-lucide="bell" class="w-4 h-4"></i>
+                <span id="notifications-unread-badge"
+                  class="hidden absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] font-extrabold items-center justify-center shadow-xs">0</span>
+              </button>
+              <div id="notifications-popover"
+                class="hidden absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-2xl shadow-2xl border border-[#E6DACE] z-50 overflow-hidden">
+                <!-- Preenchido via JS -->
+              </div>
+            </div>
+
             <!-- Badge do Usuário Logado (Abre Meu Perfil) -->
             <button id="header-user-badge" type="button" title="Abrir Meu Perfil e Alterar Senha"
               class="flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl bg-[#F5EFE6] hover:bg-amber-50 border border-[#E6DACE] hover:border-amber-400 transition cursor-pointer">

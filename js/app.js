@@ -1,21 +1,23 @@
 /**
- * Controlador principal v3 — Paróquia Santa Teresa d'Ávila • Gestão Pastoral
- * - Meu Perfil + Troca de Senha no cabeçalho (todos os perfis)
- * - Matriz Dinâmica de Permissões aplicada em tempo real na Sidebar, rotas e ações
- * - Tela dedicada "Minhas Datas" + isolamento completo por pastoral
- * - PWA Service Worker + guia de instalação Android/iOS
+ * Controlador principal v4 — Paróquia Santa Teresa d'Ávila • Gestão Pastoral
+ * - Liturgia Diária + Roteiro do Celebrante
+ * - Locais + Tipos de Celebração
+ * - Central de Notificações (Sino no cabeçalho) + Lembretes Internos de Formulários
+ * - Meu Perfil + Matriz Dinâmica de Permissões + PWA
  */
 
 import { dataService } from './services/dataService.js';
 import {
   closeModal,
   escapeHtml,
+  formatDateTimeBR,
   getFirstName,
   getInitials,
   getUserMemberships,
   getUserRoleSummary,
   hasPermission,
   isAnyCoordinator,
+  isFormClosed,
   isGeneralAdmin,
   openModal,
   refreshIcons,
@@ -26,11 +28,14 @@ import { openMyProfileModal } from './modules/profile.js';
 import { renderPermissions } from './modules/permissions.js';
 import { renderMyDates } from './modules/myDates.js';
 import { renderDashboard, resetDashboardFilter } from './modules/dashboard.js';
+import { renderLiturgy, setLiturgyViewTarget } from './modules/liturgy.js';
+import { renderLocations } from './modules/locations.js';
+import { renderCelebrationTypes } from './modules/celebrationTypes.js';
 import { renderUsers } from './modules/users.js';
 import { renderAgenda } from './modules/agenda.js';
 import { renderSchedules, resetSchedulesTab } from './modules/schedules.js';
 import { renderRoles } from './modules/roles.js';
-import { renderForms } from './modules/forms.js';
+import { renderForms, queueAutoOpenForm } from './modules/forms.js';
 import { renderNotes } from './modules/notes.js';
 import { renderNotices } from './modules/notices.js';
 import { renderBirthdays } from './modules/birthdays.js';
@@ -39,17 +44,20 @@ import { renderResponses } from './modules/responses.js';
 
 const MENU_ITEMS = [
   { id: 'dashboard', label: 'Início', subtitle: 'Visão Geral das Pastorais', icon: 'layout-dashboard', permKey: 'dashboard' },
+  { id: 'liturgy', label: 'Liturgia Diária', subtitle: 'Leituras, Orações Eucarísticas e Roteiro do Celebrante', icon: 'book-open', permKey: 'liturgy' },
   { id: 'my_dates', label: 'Minhas Datas', subtitle: 'Seus compromissos pessoais em ordem cronológica', icon: 'calendar-clock', permKey: 'my_dates' },
   { id: 'users', label: 'Gestão de Usuários', subtitle: 'Cadastro de membros e vínculos N:N com pastorais', icon: 'users', permKey: 'users', badge: 'Gestão' },
   { id: 'agenda', label: 'Agenda', subtitle: 'Calendário unificado com suas escalas e eventos', icon: 'calendar-days', permKey: 'agenda' },
   { id: 'schedules', label: 'Escalas', subtitle: 'Visão Geral das Pastorais', icon: 'calendar-check-2', permKey: 'schedules_view' },
-  { id: 'roles', label: 'Pastorais & Funções', subtitle: 'Cadastro de pastorais e funções litúrgicas/ministeriais', icon: 'sliders-horizontal', permKey: 'roles', badge: 'Gestão' },
+  { id: 'roles', label: 'Pastorais & Funções', subtitle: 'Cadastro de pastorais e funções vinculadas (1:N)', icon: 'sliders-horizontal', permKey: 'roles', badge: 'Gestão' },
+  { id: 'locations', label: 'Locais', subtitle: 'Igrejas, capelas, salões e espaços da paróquia', icon: 'map-pin', permKey: 'locations', badge: 'Gestão' },
+  { id: 'celebration_types', label: 'Tipos de Celebração', subtitle: 'Ritos, duração média e exigência de Liturgia da Palavra', icon: 'sparkles', permKey: 'celebration_types', badge: 'Gestão' },
   { id: 'forms', label: 'Formulários', subtitle: 'Pesquisas segmentadas por pastoral e prazo', icon: 'clipboard-list', permAny: ['forms_answer', 'forms_manage'] },
   { id: 'notes', label: 'Bloco de Notas', subtitle: 'Mural segmentado de orientações por pastoral', icon: 'notebook-pen', permKey: 'notes' },
   { id: 'notices', label: 'Avisos', subtitle: 'Comunicados paroquiais e das suas pastorais', icon: 'megaphone' },
   { id: 'birthdays', label: 'Aniversariantes', subtitle: 'Aniversariantes do mês e Mural de Parabéns', icon: 'cake', permKey: 'birthdays' },
   { id: 'attendance', label: 'Presença', subtitle: 'Chamadas e indicador de frequência', icon: 'check-square', permAny: ['attendance_manage', 'attendance_self'] },
-  { id: 'responses', label: 'Respostas', subtitle: 'Adesão, validação, pendentes e exportação CSV/Excel', icon: 'bar-chart-3', permKey: 'responses', badge: 'Gestão' },
+  { id: 'responses', label: 'Respostas', subtitle: 'Adesão, validação, lembretes internos e CSV/Excel', icon: 'bar-chart-3', permKey: 'responses', badge: 'Gestão' },
   { id: 'permissions', label: 'Permissões e Acessos', subtitle: 'Matriz dinâmica de permissões por perfil', icon: 'shield-check', adminOnly: true, badge: 'Admin' },
   { id: 'instagram', label: 'Instagram', subtitle: 'Perfil oficial da paróquia', icon: 'instagram', external: true },
 ];
@@ -187,22 +195,154 @@ function init() {
   }
 }
 
+function closeNotificationsPopover() {
+  document.getElementById('notifications-popover')?.classList.add('hidden');
+}
+
+function renderNotificationsBell() {
+  if (!currentUser) return;
+  const badge = document.getElementById('notifications-unread-badge');
+  const popover = document.getElementById('notifications-popover');
+  if (!badge || !popover) return;
+
+  const forms = dataService.getForms();
+  const users = dataService.getUsers();
+  const userMap = Object.fromEntries(users.map((u) => [u.id, u]));
+  const items = dataService.getNotificationsForUser(currentUser.id);
+  const unreadCount = items.filter((n) => !n.read && !n.completed).length;
+
+  if (unreadCount > 0) {
+    badge.textContent = unreadCount > 9 ? '9+' : String(unreadCount);
+    badge.classList.remove('hidden');
+    badge.classList.add('flex');
+  } else {
+    badge.classList.add('hidden');
+    badge.classList.remove('flex');
+  }
+
+  popover.innerHTML = `
+    <div class="px-4 py-3 bg-[#3E2723] text-white flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2">
+        <i data-lucide="bell" class="w-4 h-4 text-amber-400"></i>
+        <span class="text-xs font-extrabold uppercase tracking-wider">Notificações (${items.length})</span>
+      </div>
+      ${
+        unreadCount > 0
+          ? `<button id="btn-mark-all-read" type="button" class="text-[11px] font-bold text-amber-300 hover:text-white transition">Marcar lidas</button>`
+          : ''
+      }
+    </div>
+    <div class="max-h-80 overflow-y-auto custom-scrollbar divide-y divide-[#E6DACE]/70">
+      ${
+        items.length === 0
+          ? `<div class="p-6 text-center text-xs text-[#8D6E63]">Você não possui notificações no momento.</div>`
+          : items
+              .map((n) => {
+                const senderName = userMap[n.senderUserId]?.name || 'Coordenação';
+                const form = n.formId ? forms.find((f) => f.id === n.formId) : null;
+                const canAnswerNow = n.type === 'form_reminder' && !n.completed && form && !isFormClosed(form);
+                return `
+                  <div class="p-3.5 ${!n.read && !n.completed ? 'bg-amber-50/70' : 'bg-white'} space-y-2">
+                    <div class="flex items-start justify-between gap-2">
+                      <p class="text-xs font-extrabold text-[#3E2723] flex items-center gap-1.5">
+                        ${!n.read && !n.completed ? '<span class="w-2 h-2 rounded-full bg-red-600 shrink-0"></span>' : ''}
+                        ${escapeHtml(n.title)}
+                      </p>
+                      <span class="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                        n.completed
+                          ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                          : 'bg-amber-100 text-[#92400E] border border-amber-300'
+                      }">
+                        ${n.completed ? 'Concluído' : 'Pendente'}
+                      </span>
+                    </div>
+                    <p class="text-xs text-[#5D4037] leading-relaxed">${escapeHtml(n.message)}</p>
+                    <div class="flex items-center justify-between gap-2 pt-0.5">
+                      <span class="text-[10px] text-[#8D6E63]">Por ${escapeHtml(senderName)} • ${escapeHtml(formatDateTimeBR(n.createdAt))}</span>
+                      ${
+                        canAnswerNow
+                          ? `<button type="button" data-bell-answer-form="${n.formId}" data-bell-notif-id="${n.id}"
+                              class="px-2.5 py-1 rounded-lg bg-[#3E2723] hover:bg-[#5D4037] text-amber-300 text-[11px] font-bold transition">
+                              Responder Agora
+                            </button>`
+                          : ''
+                      }
+                    </div>
+                  </div>
+                `;
+              })
+              .join('')
+      }
+    </div>
+  `;
+
+  popover.querySelector('#btn-mark-all-read')?.addEventListener('click', () => {
+    dataService.markAllNotificationsReadForUser(currentUser.id);
+    renderNotificationsBell();
+  });
+
+  popover.querySelectorAll('[data-bell-answer-form]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      dataService.markNotificationRead(btn.dataset.bellNotifId);
+      closeNotificationsPopover();
+      openFormDirectly(btn.dataset.bellAnswerForm);
+    });
+  });
+
+  refreshIcons();
+}
+
+function openFormDirectly(formId) {
+  queueAutoOpenForm(formId);
+  navigate('forms');
+}
+
+function openLiturgyFor(dateISO, scheduleId) {
+  setLiturgyViewTarget(dateISO, scheduleId);
+  navigate('liturgy');
+}
+
 function bindGlobalEvents() {
   document.getElementById('modal-close-btn')?.addEventListener('click', closeModal);
   document.getElementById('modal-root')?.addEventListener('click', (e) => {
     if (e.target.id === 'modal-root') closeModal();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeModal();
+    if (e.key === 'Escape') {
+      closeModal();
+      closeNotificationsPopover();
+    }
+  });
+
+  // Sino de Notificações
+  document.getElementById('notifications-bell-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const pop = document.getElementById('notifications-popover');
+    if (!pop) return;
+    const isHidden = pop.classList.contains('hidden');
+    if (isHidden) {
+      renderNotificationsBell();
+      pop.classList.remove('hidden');
+    } else {
+      pop.classList.add('hidden');
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    const pop = document.getElementById('notifications-popover');
+    const bell = document.getElementById('notifications-bell-btn');
+    if (pop && !pop.classList.contains('hidden') && !pop.contains(e.target) && !bell?.contains(e.target)) {
+      pop.classList.add('hidden');
+    }
   });
 
   document.getElementById('open-sidebar-btn')?.addEventListener('click', () => setMobileSidebar(true));
   document.getElementById('close-sidebar-btn')?.addEventListener('click', () => setMobileSidebar(false));
   document.getElementById('sidebar-backdrop')?.addEventListener('click', () => setMobileSidebar(false));
 
-  // Meu Perfil ao clicar no avatar/nome do cabeçalho
   document.getElementById('header-user-badge')?.addEventListener('click', () => {
     if (!currentUser) return;
+    closeNotificationsPopover();
     openMyProfileModal(currentUser, {
       onProfileUpdated: (updated) => {
         currentUser = updated;
@@ -213,6 +353,7 @@ function bindGlobalEvents() {
   });
 
   document.getElementById('logout-btn')?.addEventListener('click', () => {
+    closeNotificationsPopover();
     dataService.setSessionUserId(null);
     currentUser = null;
     showLoginScreen();
@@ -222,6 +363,7 @@ function bindGlobalEvents() {
   document.getElementById('quick-profile-switcher')?.addEventListener('change', (e) => {
     const target = dataService.getUserById(e.target.value);
     if (!target) return;
+    closeNotificationsPopover();
     resetSchedulesTab();
     resetDashboardFilter();
     loginAs(target, { silent: false });
@@ -331,6 +473,7 @@ function loginAs(user, { silent = false } = {}) {
   }
 
   renderHeader();
+  renderNotificationsBell();
   renderSidebar();
   renderCurrentRoute();
 
@@ -462,9 +605,7 @@ function openInstagramModal() {
     title: 'Configurar Link do Instagram',
     bodyHtml: `
       <form id="ig-form" class="space-y-4">
-        <p class="text-sm text-[#5D4037]">
-          Defina o endereço oficial do Instagram da Paróquia Santa Teresa d'Ávila.
-        </p>
+        <p class="text-sm text-[#5D4037]">Defina o endereço oficial do Instagram da Paróquia Santa Teresa d'Ávila.</p>
         <div>
           <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">URL do Instagram *</label>
           <input name="instagramUrl" type="url" required value="${escapeHtml(settings.instagramUrl || 'https://www.instagram.com/')}"
@@ -480,8 +621,7 @@ function openInstagramModal() {
       bodyEl.querySelector('#cancel-ig-btn').addEventListener('click', closeModal);
       bodyEl.querySelector('#ig-form').addEventListener('submit', (e) => {
         e.preventDefault();
-        const url = String(new FormData(e.target).get('instagramUrl')).trim();
-        dataService.updateSettings({ instagramUrl: url });
+        dataService.updateSettings({ instagramUrl: String(new FormData(e.target).get('instagramUrl')).trim() });
         closeModal();
         renderSidebar();
         showToast('Link do Instagram atualizado!');
@@ -528,6 +668,8 @@ function renderCurrentRoute() {
     permissions,
     navigate,
     setHeaderContext,
+    openFormDirectly,
+    openLiturgyFor,
     onUsersChanged: () => renderHeader(),
     onPastoralsChanged: () => {
       renderHeader();
@@ -537,11 +679,17 @@ function renderCurrentRoute() {
       renderSidebar();
       renderCurrentRoute();
     },
+    onNotificationsChanged: () => {
+      renderNotificationsBell();
+    },
   };
 
   switch (currentRoute) {
     case 'dashboard':
       renderDashboard(container, ctx);
+      break;
+    case 'liturgy':
+      renderLiturgy(container, ctx);
       break;
     case 'my_dates':
       renderMyDates(container, ctx);
@@ -557,6 +705,12 @@ function renderCurrentRoute() {
       break;
     case 'roles':
       renderRoles(container, ctx);
+      break;
+    case 'locations':
+      renderLocations(container, ctx);
+      break;
+    case 'celebration_types':
+      renderCelebrationTypes(container, ctx);
       break;
     case 'forms':
       renderForms(container, ctx);

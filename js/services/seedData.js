@@ -1,12 +1,7 @@
 /**
- * Dados iniciais realistas (Mock Seed v3) para demonstrar:
- * - Meu Perfil + Troca de senha (senha inicial: pastoral2026)
- * - Matriz de Permissões configurável por perfil
- * - Formulários segmentados por pastoral(is) com prazo (deadline), respostas validadas,
- *   editáveis e relatório de membros pendentes
- * - Mural de Parabéns em Aniversariantes + banner festivo no Início
- * - Isolamento de Escalas + tela dedicada "Minhas Datas"
- * - Bloco de Notas e Avisos segmentados N:N por pastoral
+ * Dados iniciais realistas (Mock Seed v4)
+ * Inclui: Locais, Tipos de Celebração, Funções por Pastoral, Lembretes Internos Pendentes,
+ * Escalas com Roteiro Especial do Celebrante e todas as regras de governança.
  */
 
 function formatISO(date) {
@@ -29,11 +24,14 @@ function makeBirthDate(year, monthIndex, day) {
 
 export const PERMISSION_DEFINITIONS = [
   { key: 'dashboard', label: 'Início (Dashboard)', group: 'Geral' },
+  { key: 'liturgy', label: 'Liturgia Diária & Roteiro do Celebrante', group: 'Liturgia' },
   { key: 'agenda', label: 'Agenda', group: 'Geral' },
   { key: 'my_dates', label: 'Minhas Datas', group: 'Escalas' },
   { key: 'schedules_view', label: 'Escalas da Pastoral', group: 'Escalas' },
   { key: 'schedules_manage', label: 'Criar / Editar Escalas', group: 'Gestão' },
   { key: 'roles', label: 'Pastorais & Funções', group: 'Gestão' },
+  { key: 'locations', label: 'Locais (Igrejas, Capelas e Espaços)', group: 'Gestão' },
+  { key: 'celebration_types', label: 'Tipos de Celebração', group: 'Gestão' },
   { key: 'users', label: 'Gestão de Usuários', group: 'Gestão' },
   { key: 'forms_answer', label: 'Formulários (Responder)', group: 'Formulários' },
   { key: 'forms_manage', label: 'Formulários (Criar / Editar)', group: 'Gestão' },
@@ -49,11 +47,14 @@ export function buildDefaultPermissions() {
   return {
     coordinator: {
       dashboard: true,
+      liturgy: true,
       agenda: true,
       my_dates: true,
       schedules_view: true,
       schedules_manage: true,
       roles: true,
+      locations: true,
+      celebration_types: true,
       users: true,
       forms_answer: true,
       forms_manage: true,
@@ -66,11 +67,14 @@ export function buildDefaultPermissions() {
     },
     member: {
       dashboard: true,
+      liturgy: true,
       agenda: true,
       my_dates: true,
       schedules_view: true,
       schedules_manage: false,
       roles: false,
+      locations: false,
+      celebration_types: false,
       users: false,
       forms_answer: true,
       forms_manage: false,
@@ -140,6 +144,54 @@ export function buildSeedData() {
       description: 'Recepção fraterna dos fiéis nas portas da Matriz e capelas.',
       active: true,
     },
+  ];
+
+  const locations = [
+    {
+      id: 'loc_matriz',
+      name: "Igreja Matriz Santa Teresa d'Ávila",
+      type: 'Matriz',
+      address: 'Praça Santa Teresa, 100 — Centro',
+      active: true,
+    },
+    {
+      id: 'loc_sao_francisco',
+      name: 'Igreja São Francisco',
+      type: 'Capela',
+      address: 'Rua das Flores, 245 — Jardim São Francisco',
+      active: true,
+    },
+    {
+      id: 'loc_sao_jose',
+      name: 'Capela São José',
+      type: 'Capela',
+      address: 'Av. dos Trabalhadores, 890 — Vila Nova',
+      active: true,
+    },
+    {
+      id: 'loc_salao',
+      name: 'Salão Paroquial Santa Teresa',
+      type: 'Salão',
+      address: 'Anexo à Matriz — Entrada pela Rua Lateral',
+      active: true,
+    },
+    {
+      id: 'loc_externo',
+      name: 'Praça da Matriz (Área Externa)',
+      type: 'Externo',
+      address: 'Em frente à escadaria principal da Matriz',
+      active: false,
+    },
+  ];
+
+  const celebrationTypes = [
+    { id: 'ct_dominical', name: 'Missa Dominical', color: '#B45309', durationMin: 75, requiresLiturgyOfWord: true, active: true },
+    { id: 'ct_semanal', name: 'Missa Semanal', color: '#5D4037', durationMin: 60, requiresLiturgyOfWord: true, active: true },
+    { id: 'ct_solene', name: 'Missa Solene / Padroeira', color: '#991B1B', durationMin: 90, requiresLiturgyOfWord: true, active: true },
+    { id: 'ct_adoracao', name: 'Adoração ao Santíssimo', color: '#D97706', durationMin: 60, requiresLiturgyOfWord: false, active: true },
+    { id: 'ct_batizado', name: 'Batizado', color: '#0F766E', durationMin: 60, requiresLiturgyOfWord: true, active: true },
+    { id: 'ct_casamento', name: 'Casamento', color: '#881337', durationMin: 75, requiresLiturgyOfWord: true, active: true },
+    { id: 'ct_novena', name: 'Via-Sacra / Novena', color: '#6D28D9', durationMin: 45, requiresLiturgyOfWord: false, active: true },
   ];
 
   const roles = [
@@ -224,7 +276,7 @@ export function buildSeedData() {
       email: 'joao@santateresa.org.br',
       password: defaultPass,
       phone: '(11) 99655-8831',
-      birthDate: makeBirthDate(2005, curMonth, curDay), // Aniversariante de hoje!
+      birthDate: makeBirthDate(2005, curMonth, curDay),
       isGeneralAdmin: false,
       status: 'Ativo',
       memberships: [
@@ -332,9 +384,14 @@ export function buildSeedData() {
       id: 'sch_past_1',
       date: dMinus4,
       time: '19:00',
-      location: 'Matriz Santa Teresa',
+      locationId: 'loc_matriz',
+      location: "Igreja Matriz Santa Teresa d'Ávila",
+      celebrationTypeId: 'ct_dominical',
       celebrationType: 'Missa Dominical',
       pastoralId: 'pas_coroinhas',
+      eucharisticPrayerId: 'oe_3',
+      eucharisticPrayerSource: 'default',
+      celebrantScript: '',
       notes: 'Chegar 30 minutos antes na sacristia.',
       assignments: [
         { id: 'asg_p1', pastoralId: 'pas_coroinhas', roleId: 'role_missal', userId: 'usr_joao', substitutionRequested: false, substitutionReason: '' },
@@ -346,22 +403,34 @@ export function buildSeedData() {
       id: 'sch_today',
       date: dToday,
       time: '19:30',
-      location: 'Matriz Santa Teresa',
-      celebrationType: 'Missa Semanal',
+      locationId: 'loc_matriz',
+      location: "Igreja Matriz Santa Teresa d'Ávila",
+      celebrationTypeId: 'ct_solene',
+      celebrationType: 'Missa Solene / Padroeira',
       pastoralId: 'pas_coroinhas',
-      notes: 'Missa comunitária da semana. Chegar às 19:00.',
+      eucharisticPrayerId: 'oe_3',
+      eucharisticPrayerSource: 'custom',
+      celebrantScript:
+        '1. Entrada solene pelo corredor central com turíbulo e cruz processional.\n2. Após a homilia, haverá bênção especial dos novos coroinhas e renovação dos compromissos.\n3. Utilizar Oração Eucarística III com incensação do altar e das oferendas.\n4. Ao final, procissão breve até o altar lateral de Santa Teresa d’Ávila.',
+      notes: 'Roteiro Especial do Pe. Marcos — chegar às 18:50 para preparação do turíbulo.',
       assignments: [
         { id: 'asg_t1', pastoralId: 'pas_coroinhas', roleId: 'role_coord_missa', userId: 'usr_natalia', substitutionRequested: false, substitutionReason: '' },
-        { id: 'asg_t2', pastoralId: 'pas_coroinhas', roleId: 'role_cruz', userId: 'usr_maria', substitutionRequested: false, substitutionReason: '' },
+        { id: 'asg_t2', pastoralId: 'pas_coroinhas', roleId: 'role_turiferario', userId: 'usr_joao', substitutionRequested: false, substitutionReason: '' },
+        { id: 'asg_t3', pastoralId: 'pas_coroinhas', roleId: 'role_cruz', userId: 'usr_maria', substitutionRequested: false, substitutionReason: '' },
       ],
     },
     {
       id: 'sch_1',
       date: dPlus1,
       time: '19:00',
+      locationId: 'loc_sao_francisco',
       location: 'Igreja São Francisco',
+      celebrationTypeId: 'ct_semanal',
       celebrationType: 'Missa Semanal',
       pastoralId: 'pas_coroinhas',
+      eucharisticPrayerId: 'oe_2',
+      eucharisticPrayerSource: 'default',
+      celebrantScript: '',
       notes: 'Chegar às 18:30 para organização do altar.',
       assignments: [
         { id: 'asg_1', pastoralId: 'pas_coroinhas', roleId: 'role_missal', userId: 'usr_joao', substitutionRequested: false, substitutionReason: '' },
@@ -373,9 +442,14 @@ export function buildSeedData() {
       id: 'sch_2',
       date: dPlus1,
       time: '19:00',
+      locationId: 'loc_sao_francisco',
       location: 'Igreja São Francisco',
+      celebrationTypeId: 'ct_semanal',
       celebrationType: 'Missa Semanal',
       pastoralId: 'pas_musica',
+      eucharisticPrayerId: 'oe_2',
+      eucharisticPrayerSource: 'default',
+      celebrantScript: '',
       notes: 'Repertório do Tempo Comum — conferir cifra no Bloco de Notas.',
       assignments: [
         { id: 'asg_4', pastoralId: 'pas_musica', roleId: 'role_violao', userId: 'usr_joao', substitutionRequested: false, substitutionReason: '' },
@@ -387,9 +461,15 @@ export function buildSeedData() {
       id: 'sch_3',
       date: dPlus3,
       time: '09:30',
-      location: 'Matriz Santa Teresa',
+      locationId: 'loc_matriz',
+      location: "Igreja Matriz Santa Teresa d'Ávila",
+      celebrationTypeId: 'ct_dominical',
       celebrationType: 'Missa Dominical',
       pastoralId: 'pas_liturgia',
+      eucharisticPrayerId: 'oe_cri_1',
+      eucharisticPrayerSource: 'custom',
+      celebrantScript:
+        'Missa dominical com participação especial da Catequese. Utilizar Oração Eucarística para Missas com Crianças I e dar breve explicação antes do Evangelho.',
       notes: 'Confirmar leituras do domingo no lecionário.',
       assignments: [
         { id: 'asg_7', pastoralId: 'pas_liturgia', roleId: 'role_leitura1', userId: 'usr_sofia', substitutionRequested: false, substitutionReason: '' },
@@ -401,9 +481,14 @@ export function buildSeedData() {
       id: 'sch_4',
       date: dPlus3,
       time: '19:00',
-      location: 'Matriz Santa Teresa',
-      celebrationType: 'Solenidade',
+      locationId: 'loc_matriz',
+      location: "Igreja Matriz Santa Teresa d'Ávila",
+      celebrationTypeId: 'ct_solene',
+      celebrationType: 'Missa Solene / Padroeira',
       pastoralId: 'pas_acolhida',
+      eucharisticPrayerId: 'oe_1',
+      eucharisticPrayerSource: 'custom',
+      celebrantScript: 'Recepção solene com entrega de folhetos comemorativos nas portas principal e lateral.',
       notes: 'Recepção festiva nas duas entradas da Matriz.',
       assignments: [
         { id: 'asg_10', pastoralId: 'pas_acolhida', roleId: 'role_porta_principal', userId: 'usr_carlos', substitutionRequested: false, substitutionReason: '' },
@@ -414,9 +499,14 @@ export function buildSeedData() {
       id: 'sch_5',
       date: dPlus6,
       time: '19:00',
-      location: 'Matriz Santa Teresa',
+      locationId: 'loc_matriz',
+      location: "Igreja Matriz Santa Teresa d'Ávila",
+      celebrationTypeId: 'ct_dominical',
       celebrationType: 'Missa Dominical',
       pastoralId: 'pas_ministros',
+      eucharisticPrayerId: 'oe_3',
+      eucharisticPrayerSource: 'default',
+      celebrantScript: '',
       notes: 'Oração breve na capela do Santíssimo às 18:40.',
       assignments: [
         { id: 'asg_12', pastoralId: 'pas_ministros', roleId: 'role_min_altar', userId: 'usr_rafael', substitutionRequested: false, substitutionReason: '' },
@@ -428,14 +518,18 @@ export function buildSeedData() {
       id: 'sch_6',
       date: dPlus9,
       time: '10:00',
-      location: 'Matriz Santa Teresa',
-      celebrationType: 'Missa Dominical',
+      locationId: 'loc_sao_jose',
+      location: 'Capela São José',
+      celebrationTypeId: 'ct_batizado',
+      celebrationType: 'Batizado',
       pastoralId: 'pas_coroinhas',
-      notes: 'Missa solene com participação das famílias.',
+      eucharisticPrayerId: 'oe_2',
+      eucharisticPrayerSource: 'default',
+      celebrantScript: 'Preparar pia batismal, óleo dos catecúmenos, crisma e círio pascal aceso.',
+      notes: 'Celebração comunitária de Batizados.',
       assignments: [
         { id: 'asg_15', pastoralId: 'pas_coroinhas', roleId: 'role_turiferario', userId: 'usr_joao', substitutionRequested: false, substitutionReason: '' },
         { id: 'asg_16', pastoralId: 'pas_coroinhas', roleId: 'role_cruz', userId: 'usr_maria', substitutionRequested: false, substitutionReason: '' },
-        { id: 'asg_17', pastoralId: 'pas_coroinhas', roleId: 'role_cerimonialista', userId: 'usr_rafael', substitutionRequested: false, substitutionReason: '' },
       ],
     },
   ];
@@ -445,9 +539,12 @@ export function buildSeedData() {
       id: 'evt_1',
       title: 'Ensaio Litúrgico — Coroinhas e Liturgia',
       type: 'Ensaio',
+      celebrationTypeId: 'ct_solene',
+      celebrationType: 'Missa Solene / Padroeira',
       date: dPlus1,
       time: '17:30',
-      location: 'Matriz Santa Teresa',
+      locationId: 'loc_matriz',
+      location: "Igreja Matriz Santa Teresa d'Ávila",
       description: 'Ensaio prático de procissão de entrada e proclamação das leituras.',
       pastoralId: 'pas_coroinhas',
     },
@@ -455,25 +552,30 @@ export function buildSeedData() {
       id: 'evt_2',
       title: 'Ensaio do Ministério de Música',
       type: 'Ensaio',
+      celebrationTypeId: 'ct_dominical',
+      celebrationType: 'Missa Dominical',
       date: dPlus3,
       time: '17:00',
+      locationId: 'loc_salao',
       location: 'Salão Paroquial Santa Teresa',
       description: 'Passagem do repertório da Solenidade e afinação dos instrumentos.',
       pastoralId: 'pas_musica',
     },
     {
       id: 'evt_3',
-      title: 'Encontro Geral das Pastorais com o Pároco',
-      type: 'Reunião',
+      title: 'Adoração Comunitária com as Pastorais',
+      type: 'Celebração',
+      celebrationTypeId: 'ct_adoracao',
+      celebrationType: 'Adoração ao Santíssimo',
       date: dPlus6,
       time: '20:15',
-      location: 'Salão Paroquial Santa Teresa',
-      description: 'Alinhamento do calendário litúrgico paroquial com todas as pastorais.',
+      locationId: 'loc_matriz',
+      location: "Igreja Matriz Santa Teresa d'Ávila",
+      description: 'Momento de oração e adoração com todas as pastorais da paróquia.',
       pastoralId: 'all',
     },
   ];
 
-  // Notas com vínculo N:N obrigatório (pastoralIds)
   const notes = [
     {
       id: 'note_1',
@@ -522,7 +624,6 @@ export function buildSeedData() {
     },
   ];
 
-  // Formulários com segmentação N:N (pastoralIds) e prazo de encerramento (deadline)
   const forms = [
     {
       id: 'form_1',
@@ -578,14 +679,13 @@ export function buildSeedData() {
     },
   ];
 
-  // Respostas: inclui resposta JÁ VALIDADA (bloqueada) e resposta PENDENTE DE VALIDAÇÃO (editável pelo membro)
   const responses = [
     {
       id: 'resp_1',
       formId: 'form_1',
       userId: 'usr_joao',
       submittedAt: `${dMinus2}T10:15:00`,
-      validated: false, // João ainda pode editar até a Coordenação validar!
+      validated: false,
       validatedBy: null,
       validatedAt: null,
       answers: {
@@ -599,7 +699,7 @@ export function buildSeedData() {
       formId: 'form_1',
       userId: 'usr_maria',
       submittedAt: `${dMinus2}T14:40:00`,
-      validated: true, // Validada pela Coordenação (bloqueada para edição)
+      validated: true,
       validatedBy: 'usr_natalia',
       validatedAt: `${dMinus1}T09:10:00`,
       answers: {
@@ -613,7 +713,7 @@ export function buildSeedData() {
       formId: 'form_2',
       userId: 'usr_joao',
       submittedAt: `${dMinus2}T19:05:00`,
-      validated: true, // Validada por Carlos — bloqueada para edição por João!
+      validated: true,
       validatedBy: 'usr_carlos',
       validatedAt: `${dMinus1}T11:20:00`,
       answers: {
@@ -621,21 +721,8 @@ export function buildSeedData() {
         q_5: 'Sim',
       },
     },
-    {
-      id: 'resp_4',
-      formId: 'form_4',
-      userId: 'usr_joao',
-      submittedAt: `${dMinus2}T12:00:00`,
-      validated: true,
-      validatedBy: 'usr_natalia',
-      validatedAt: `${dMinus2}T15:00:00`,
-      answers: {
-        q_8: 'Sim',
-      },
-    },
   ];
 
-  // Avisos segmentados N:N por pastoral (pastoralIds)
   const notices = [
     {
       id: 'not_1',
@@ -663,6 +750,34 @@ export function buildSeedData() {
       pastoralIds: ['pas_musica', 'pas_acolhida'],
       pinned: false,
       createdAt: `${dMinus1}T11:15:00`,
+    },
+  ];
+
+  // Notificações internas iniciais (lembretes pendentes para demonstrar o Sino e o Banner no Início!)
+  const notifications = [
+    {
+      id: 'notif_1',
+      type: 'form_reminder',
+      recipientUserId: 'usr_joao',
+      senderUserId: 'usr_admin',
+      formId: 'form_3',
+      title: 'Lembrete de Formulário Pendente',
+      message: "A Coordenação enviou um lembrete: responda ao formulário 'Pesquisa Geral — Encontro Paroquial de Santa Teresa' antes do prazo.",
+      createdAt: `${dToday}T10:00:00`,
+      read: false,
+      completed: false,
+    },
+    {
+      id: 'notif_2',
+      type: 'form_reminder',
+      recipientUserId: 'usr_lucas',
+      senderUserId: 'usr_natalia',
+      formId: 'form_1',
+      title: 'Lembrete de Formulário Pendente',
+      message: "A Coordenação enviou um lembrete: responda ao formulário 'Disponibilidade para Escalas — Coroinhas e Liturgia' antes do prazo.",
+      createdAt: `${dToday}T09:15:00`,
+      read: false,
+      completed: false,
     },
   ];
 
@@ -714,6 +829,8 @@ export function buildSeedData() {
 
   return {
     pastorals,
+    locations,
+    celebrationTypes,
     users,
     roles,
     schedules,
@@ -722,6 +839,7 @@ export function buildSeedData() {
     forms,
     responses,
     notices,
+    notifications,
     attendance,
     permissions: buildDefaultPermissions(),
     birthdayMessages,

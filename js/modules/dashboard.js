@@ -37,7 +37,7 @@ export function resetDashboardFilter() {
   dashboardPastoralFilter = 'all';
 }
 
-export function renderDashboard(container, { user, navigate, setHeaderContext, permissions }) {
+export function renderDashboard(container, { user, navigate, setHeaderContext, permissions, openFormDirectly }) {
   const today = new Date();
   const todayISO = getTodayISO();
   const curMonth = today.getMonth() + 1;
@@ -173,8 +173,42 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
   const roleSummary = getUserRoleSummary(user, pastorals);
   const myMemberships = getUserMemberships(user);
 
+  // Lembretes internos pendentes de formulários para o usuário logado
+  const activeReminders = dataService
+    .getNotificationsForUser(user.id)
+    .filter((n) => n.type === 'form_reminder' && !n.completed)
+    .filter((n) => {
+      const f = forms.find((x) => x.id === n.formId);
+      return f && !isFormClosed(f);
+    });
+
+  const reminderBannersHtml = activeReminders
+    .map(
+      (rem) => `
+      <section class="rounded-2xl bg-red-50 border-2 border-red-300 p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div class="flex items-start gap-3">
+          <div class="w-10 h-10 rounded-xl bg-red-700 text-white flex items-center justify-center shrink-0">
+            <i data-lucide="bell-ring" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <p class="text-[11px] font-extrabold uppercase tracking-wider text-red-700">Lembrete da Coordenação • Pendência</p>
+            <p class="text-sm font-bold text-[#3E2723] mt-0.5">${escapeHtml(rem.message)}</p>
+            <p class="text-xs text-[#6D4C41] mt-0.5">Enviado em ${escapeHtml(formatDateTimeBR(rem.createdAt))}</p>
+          </div>
+        </div>
+        <button type="button" data-answer-reminder-form="${rem.formId}" data-reminder-id="${rem.id}"
+          class="shrink-0 self-start sm:self-center inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#3E2723] hover:bg-[#5D4037] text-amber-300 text-xs font-extrabold shadow-xs transition">
+          <i data-lucide="send" class="w-3.5 h-3.5"></i>
+          Responder Agora
+        </button>
+      </section>
+    `,
+    )
+    .join('');
+
   container.innerHTML = `
     <div class="space-y-6">
+      ${reminderBannersHtml}
       ${birthdayBannerHtml}
 
       <!-- Cabeçalho Interno Dinâmico + Filtro de Pastoral -->
@@ -472,7 +506,14 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
 
   container.querySelector('#dashboard-pastoral-filter')?.addEventListener('change', (e) => {
     dashboardPastoralFilter = e.target.value;
-    renderDashboard(container, { user, navigate, setHeaderContext, permissions });
+    renderDashboard(container, { user, navigate, setHeaderContext, permissions, openFormDirectly });
+  });
+
+  container.querySelectorAll('[data-answer-reminder-form]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      dataService.markNotificationRead(btn.dataset.reminderId);
+      openFormDirectly?.(btn.dataset.answerReminderForm);
+    });
   });
 
   container.querySelectorAll('[data-nav]').forEach((btn) => {
