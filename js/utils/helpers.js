@@ -266,13 +266,20 @@ export function renderPastoralPillsList(pastoralIds, pastoralMap, { compact = fa
 // --- Detecção Amigável de Conflitos de Horário ---
 
 export function buildUserTimeSlotIndex(schedules) {
-  const counts = {};
+  // Conta em quantas escalas DISTINTAS no mesmo dia/horário o integrante aparece
+  // (assim, acumular Acólito + Coordenador de Plantão na MESMA missa não gera falso conflito)
+  const scheduleSets = {};
   schedules.forEach((sch) => {
     (sch.assignments || []).forEach((asg) => {
       const personKey = asg.memberId || asg.userId;
       const key = `${personKey}|${sch.date}|${sch.time}`;
-      counts[key] = (counts[key] || 0) + 1;
+      if (!scheduleSets[key]) scheduleSets[key] = new Set();
+      scheduleSets[key].add(sch.id);
     });
+  });
+  const counts = {};
+  Object.entries(scheduleSets).forEach(([k, set]) => {
+    counts[k] = set.size;
   });
   return counts;
 }

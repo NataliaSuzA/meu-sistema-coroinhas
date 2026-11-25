@@ -129,11 +129,18 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
         ${
           canCreateEdit
             ? `
-          <button id="btn-new-schedule" type="button"
-            class="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#3E2723] hover:bg-[#5D4037] text-white text-sm font-semibold shadow-sm transition shrink-0">
-            <i data-lucide="plus-circle" class="w-4 h-4 text-amber-400"></i>
-            Nova Escala
-          </button>
+          <div class="flex items-center gap-2 flex-wrap shrink-0">
+            <button id="btn-import-whatsapp" type="button"
+              class="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-white hover:bg-amber-50 text-[#3E2723] border border-[#D7C4B2] hover:border-[#B45309] text-sm font-semibold shadow-xs transition">
+              <i data-lucide="message-square-text" class="w-4 h-4 text-[#B45309]"></i>
+              Importar Escala (Texto WhatsApp)
+            </button>
+            <button id="btn-new-schedule" type="button"
+              class="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#3E2723] hover:bg-[#5D4037] text-white text-sm font-semibold shadow-sm transition">
+              <i data-lucide="plus-circle" class="w-4 h-4 text-amber-400"></i>
+              Nova Escala
+            </button>
+          </div>
         `
             : ''
         }
@@ -293,6 +300,10 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
   container.querySelector('#btn-new-schedule')?.addEventListener('click', () => {
     const defaultPastoralId = coordPastoralIds.includes(activeTab) ? activeTab : coordPastoralIds[0];
     openScheduleModal(null, { user, defaultPastoralId }, rerender);
+  });
+
+  container.querySelector('#btn-import-whatsapp')?.addEventListener('click', () => {
+    openWhatsAppImportModal({ user }, rerender);
   });
 
   // Botões de "Assumir / Aceitar Substituição" (tanto no Banner do topo quanto dentro dos cards!)
@@ -1311,6 +1322,464 @@ function openReassignModal(scheduleId, assignmentId, user, onDone) {
         closeModal();
         showToast('Integrante reatribuído com sucesso!');
         onDone();
+      });
+    },
+  });
+}
+
+// --- Importador Inteligente de Escala (Texto WhatsApp) ---
+
+function normText(str) {
+  return String(str || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function findParticipantByName(rawToken, pastoralId, participantsByPastoral, allUsers) {
+  let cleanToken = String(rawToken || '').trim();
+  let roleHint = '';
+  const parenMatch = cleanToken.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
+  if (parenMatch) {
+    const inner = normText(parenMatch[2]);
+    // Mantém "(Acólitos)" ou "(Coroinhas)" como desambiguador de nome; outros parênteses viram função (ex: Missal, Turíbulo)
+    if (!inner.includes('acolit') && !inner.includes('coroinh')) {
+      cleanToken = parenMatch[1].trim();
+      roleHint = parenMatch[2].trim();
+    }
+  }
+
+  const targetNorm = normText(cleanToken);
+  if (!targetNorm) return null;
+
+  const pool = pastoralId ? participantsByPastoral[pastoralId] || [] : [];
+
+  const matchInList = (list) => {
+    // 1. Correspondência exata normalizada
+    let hit = list.find((p) => normText(p.name) === targetNorm);
+    if (hit) return hit;
+    // 2. Correspondência removendo sufixo "(Acólitos)" / "(Coroinhas)"
+    hit = list.find((p) => normText(p.name.replace(/\([^)]*\)/g, '')) === targetNorm);
+    if (hit) return hit;
+    // 3. Primeiro nome exato ou prefixo (ex: "Natália" -> "Natália Faria de Souza")
+    hit = list.find((p) => normText(p.name).startsWith(`${targetNorm} `) || normText(p.name) === targetNorm);
+    return hit || null;
+  };
+
+  let found = matchInList(pool);
+  if (!found && pastoralId === null) {
+    // Busca entre coordenadores / todos os usuários ativos
+    const flatAll = [];
+    allUsers
+      .filter((u) => u.status === 'Ativo')
+      .forEach((u) => {
+        getAccountMembers(u).forEach((m) => {
+          flatAll.push({ accountId: u.id, memberId: m.id, name: m.name });
+        });
+      });
+    found = matchInList(flatAll);
+  }
+
+  return found ? { ...found, roleHint } : null;
+}
+
+function parseWhatsAppScheduleText(rawText, { defaultYear, defaultPastoralId, pastorals, locations, celebrationTypes, roles, users }) {
+  const activePastorals = pastorals.filter((p) => p.active);
+  const coroinhasP = activePastorals.find((p) => normText(p.shortName) === 'coroinhas') || activePastorals[0];
+  const acolitosP = activePastorals.find((p) => normText(p.shortName) === 'acolitos') || activePastorals[1] || activePastorals[0];
+  const defaultLoc = locations.find((l) => normText(l.name).includes('matriz')) || locations[0];
+
+  const participantsByPastoral = {};
+  activePastorals.forEach((p) => {
+    participantsByPastoral[p.id] = dataService.getActiveParticipantsByPastoral(p.id);
+  });
+
+  const findRoleFor = (pastoralId, hintText, isCoord = false) => {
+    const pRoles = roles.filter((r) => r.pastoralId === pastoralId && r.active);
+    if (isCoord) {
+      return pRoles.find((r) => normText(r.name).includes('coordenador')) || pRoles[0];
+    }
+    if (hintText) {
+      const hn = normText(hintText);
+      const exact = pRoles.find((r) => normText(r.name).includes(hn) || hn.includes(normText(r.name)));
+      if (exact) return exact;
+      if (hn.includes('turib')) {
+        const tur = pRoles.find((r) => normText(r.name).includes('turif') || normText(r.name).includes('turib'));
+        if (tur) return tur;
+      }
+    }
+    return pRoles.find((r) => normText(r.name).includes('altar')) || pRoles[0];
+  };
+
+  const detectLocation = (line) => {
+    const ln = normText(line);
+    if (ln.includes('sao francisco') || ln.includes('francisco')) {
+      return locations.find((l) => normText(l.name).includes('francisco')) || defaultLoc;
+    }
+    if (ln.includes('sav')) {
+      return locations.find((l) => normText(l.name).includes('sav')) || defaultLoc;
+    }
+    if (ln.includes('matriz')) return defaultLoc;
+    const match = locations.find((l) => ln.includes(normText(l.name)));
+    return match || null;
+  };
+
+  const detectCelebrationType = (contextText, isoDate) => {
+    const cn = normText(contextText);
+    if (cn.includes('finados')) return celebrationTypes.find((c) => normText(c.name).includes('finados')) || celebrationTypes[0];
+    if (cn.includes('sagrado')) return celebrationTypes.find((c) => normText(c.name).includes('sagrado')) || celebrationTypes[0];
+    if (cn.includes('novena')) return celebrationTypes.find((c) => normText(c.name).includes('novena')) || celebrationTypes[0];
+    if (cn.includes('sav')) return celebrationTypes.find((c) => normText(c.name).includes('sav')) || celebrationTypes[0];
+    const [y, m, d] = isoDate.split('-').map(Number);
+    const dow = new Date(y, m - 1, d).getDay(); // 0=Dom, 6=Sáb
+    if (dow === 0 || dow === 6) {
+      return celebrationTypes.find((c) => normText(c.name).includes('dominical')) || celebrationTypes[0];
+    }
+    return celebrationTypes.find((c) => normText(c.name).includes('semanal')) || celebrationTypes[0];
+  };
+
+  const lines = String(rawText || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const entries = [];
+  let currentDate = null;
+  let currentDayHint = '';
+  let currentEntry = null;
+
+  const ensureEntry = (time, locObj, contextText) => {
+    if (!currentDate) return null;
+    const loc = locObj || defaultLoc;
+    const ct = detectCelebrationType(`${currentDayHint} ${contextText}`, currentDate);
+    // Reaproveita entrada já aberta para a mesma Data + Horário + Local
+    let existing = entries.find((e) => e.date === currentDate && e.time === time && e.locationId === loc.id);
+    if (!existing) {
+      existing = {
+        date: currentDate,
+        time,
+        locationId: loc.id,
+        location: loc.name,
+        celebrationTypeId: ct.id,
+        celebrationType: ct.name,
+        assignments: [],
+        notes: [],
+        unmatched: [],
+      };
+      entries.push(existing);
+    }
+    currentEntry = existing;
+    return existing;
+  };
+
+  const addNamesToEntry = (entry, rawNames, pastoralId, isCoord = false) => {
+    if (!entry) return;
+    rawNames
+      .split(/[,;|]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .forEach((tok) => {
+        const hit = findParticipantByName(tok, isCoord ? null : pastoralId, participantsByPastoral, users);
+        if (!hit) {
+          entry.unmatched.push(tok);
+          return;
+        }
+        const targetPastoralId = pastoralId || coroinhasP?.id || acolitosP?.id;
+        const role = findRoleFor(targetPastoralId, hit.roleHint, isCoord);
+        if (!role) return;
+        const dup = entry.assignments.some(
+          (a) => a.userId === hit.accountId && a.memberId === hit.memberId && a.roleId === role.id,
+        );
+        if (!dup) {
+          entry.assignments.push({
+            pastoralId: targetPastoralId,
+            roleId: role.id,
+            userId: hit.accountId,
+            memberId: hit.memberId,
+            displayName: hit.name,
+            roleName: role.name,
+          });
+        }
+      });
+  };
+
+  lines.forEach((line) => {
+    // 1. Detecta data: 07/11 ou 07/11/2026
+    const dateMatch = line.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/);
+    if (dateMatch) {
+      const dd = String(Number(dateMatch[1])).padStart(2, '0');
+      const mm = String(Number(dateMatch[2])).padStart(2, '0');
+      const yyyy = dateMatch[3]
+        ? dateMatch[3].length === 2
+          ? `20${dateMatch[3]}`
+          : dateMatch[3]
+        : String(defaultYear);
+      currentDate = `${yyyy}-${mm}-${dd}`;
+      currentDayHint = line;
+    }
+
+    // 2. Detecta horário: 17h30, 19:00, 07h
+    const timeMatch = line.match(/(\d{1,2})\s*[h:]\s*(\d{2})?/i);
+    if (timeMatch && (dateMatch || /[\u{1F550}-\u{1F567}]|^\s*\d{1,2}\s*[h:]/u.test(line) || line.includes('—') || line.includes('-'))) {
+      const hh = String(Number(timeMatch[1])).padStart(2, '0');
+      const min = timeMatch[2] ? timeMatch[2] : '00';
+      const loc = detectLocation(line) || defaultLoc;
+      ensureEntry(`${hh}:${min}`, loc, line);
+
+      // Se a mesma linha já traz "Coroinhas:", "Acólitos:", "Coord.:" separados por "|" ou "—"
+      const afterTime = line.slice(timeMatch.index + timeMatch[0].length);
+      if (/(coroinhas|ac[oó]litos|coord\.?)\s*:/i.test(afterTime)) {
+        const segments = afterTime.split('|');
+        segments.forEach((seg) => {
+          const corM = seg.match(/coroinhas\s*:\s*(.+)$/i);
+          const acoM = seg.match(/ac[oó]litos?\s*:\s*(.+)$/i);
+          const coordM = seg.match(/coord(?:enador[a]?)?\.?\s*:\s*(.+)$/i);
+          if (corM && coroinhasP) addNamesToEntry(currentEntry, corM[1], coroinhasP.id, false);
+          else if (acoM && acolitosP) addNamesToEntry(currentEntry, acoM[1], acolitosP.id, false);
+          else if (coordM) addNamesToEntry(currentEntry, coordM[1], currentEntry.assignments[0]?.pastoralId || coroinhasP?.id, true);
+        });
+        return;
+      }
+
+      // Se na própria linha houver nomes após "-" ou ":" (ex: "19h00 - Matriz: Alice, Emanuelly")
+      const inlineColon = afterTime.match(/:\s*(.+)$/);
+      if (inlineColon && defaultPastoralId !== 'auto') {
+        addNamesToEntry(currentEntry, inlineColon[1], defaultPastoralId, false);
+      }
+      return;
+    }
+
+    if (!currentEntry) return;
+
+    // 3. Linhas de integrantes / coordenador / observação dentro da celebração atual
+    const corLine = line.match(/^(?:[-•*]\s*)?coroinhas\s*:\s*(.+)$/i);
+    if (corLine && coroinhasP) {
+      addNamesToEntry(currentEntry, corLine[1], coroinhasP.id, false);
+      return;
+    }
+
+    const acoLine = line.match(/^(?:[-•*]\s*)?ac[oó]litos?\s*:\s*(.+)$/i);
+    if (acoLine && acolitosP) {
+      addNamesToEntry(currentEntry, acoLine[1], acolitosP.id, false);
+      return;
+    }
+
+    const coordLine = line.match(/^(?:[-•*]\s*)?coord(?:enador[a]?)?\.?\s*:\s*(.+)$/i);
+    if (coordLine) {
+      const targetPid = currentEntry.assignments[0]?.pastoralId || coroinhasP?.id || acolitosP?.id;
+      addNamesToEntry(currentEntry, coordLine[1], targetPid, true);
+      return;
+    }
+
+    const obsLine = line.match(/^(?:[-•*]\s*)?obs(?:erva[cç][aã]o)?\.?\s*:\s*(.+)$/i);
+    if (obsLine) {
+      currentEntry.notes.push(obsLine[1].trim());
+      return;
+    }
+
+    // Linha com nomes soltos separados por vírgula (usa pastoral padrão escolhida)
+    if (defaultPastoralId !== 'auto' && !dateMatch) {
+      addNamesToEntry(currentEntry, line.replace(/^[-•*]\s*/, ''), defaultPastoralId, false);
+    }
+  });
+
+  return entries.filter((e) => e.assignments.length > 0 || e.unmatched.length > 0);
+}
+
+function openWhatsAppImportModal({ user }, onSaved) {
+  const pastorals = dataService.getActivePastorals();
+  const managedIds = new Set(getCoordinatedPastoralIds(user, pastorals));
+  const managedPastorals = pastorals.filter((p) => managedIds.has(p.id));
+  const locations = dataService.getActiveLocations();
+  const celebrationTypes = dataService.getActiveCelebrationTypes();
+  const roles = dataService.getRoles();
+  const users = dataService.getUsers();
+  const existingSchedules = dataService.getSchedules();
+  const pastoralMap = Object.fromEntries(pastorals.map((p) => [p.id, p]));
+
+  let parsedEntries = [];
+
+  openModal({
+    title: 'Importar Escala (Texto WhatsApp)',
+    maxWidth: 'max-w-3xl',
+    bodyHtml: `
+      <div class="space-y-4">
+        <div class="rounded-xl bg-amber-50 border border-amber-300 p-3.5 text-xs text-[#4E342E] space-y-1">
+          <p class="font-bold text-[#78350F]">Como funciona:</p>
+          <p>Cole abaixo o texto da escala no padrão do WhatsApp (com <strong>📌 Dia</strong>, <strong>🕖 Horário</strong>, Local e nomes separados por vírgula). Celebrações na mesma Data, Horário e Local serão unificadas automaticamente no Cloud Firestore.</p>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Ano de Referência</label>
+            <input id="wa-import-year" type="number" value="2026" min="2024" max="2035"
+              class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm font-semibold outline-none focus:border-[#B45309]">
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Pastoral Padrão (quando não escrita na linha)</label>
+            <select id="wa-import-pastoral" class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm font-semibold outline-none focus:border-[#B45309]">
+              <option value="auto">Automático (detectar Coroinhas: / Acólitos:)</option>
+              ${managedPastorals.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Texto da Escala (WhatsApp) *</label>
+          <textarea id="wa-import-text" rows="7"
+            placeholder="📌 07/11 (Sáb)&#10;🕖 17h30 - Matriz&#10;Coroinhas: Eloah, Bernardo, Théo, Carol, Rafael P.&#10;Acólitos: Lorenzo, Miguel, Manu&#10;Coord.: João Pedro&#10;&#10;🕖 19h00 - Matriz&#10;Coroinhas: Helena 1, Olívia, Alice&#10;Acólitos: Marina&#10;Coord.: Gustavo"
+            class="w-full px-3.5 py-2.5 rounded-xl border border-[#E6DACE] bg-[#FAF6F0] focus:bg-white text-xs sm:text-sm font-mono focus:border-[#B45309] outline-none"></textarea>
+        </div>
+
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <button id="btn-wa-parse" type="button"
+            class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#B45309] hover:bg-[#92400E] text-white text-xs sm:text-sm font-bold shadow-xs transition">
+            <i data-lucide="sparkles" class="w-4 h-4"></i>
+            Analisar e Pré-visualizar
+          </button>
+          <span id="wa-parse-summary" class="text-xs font-semibold text-[#6D4C41]"></span>
+        </div>
+
+        <div id="wa-preview-box" class="hidden space-y-2.5 max-h-64 overflow-y-auto custom-scrollbar pr-1"></div>
+
+        <div class="flex justify-end gap-2 pt-3 border-t border-[#E6DACE]/80">
+          <button type="button" id="cancel-wa-import" class="px-4 py-2 rounded-xl border border-[#E6DACE] text-sm font-semibold text-[#5D4037] hover:bg-[#FAF6F0]">Cancelar</button>
+          <button type="button" id="btn-wa-confirm" disabled
+            class="px-5 py-2 rounded-xl bg-[#3E2723] hover:bg-[#5D4037] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold transition">
+            Confirmar e Salvar no Firestore
+          </button>
+        </div>
+      </div>
+    `,
+    onMount(bodyEl) {
+      const textEl = bodyEl.querySelector('#wa-import-text');
+      const yearEl = bodyEl.querySelector('#wa-import-year');
+      const pastoralEl = bodyEl.querySelector('#wa-import-pastoral');
+      const previewBox = bodyEl.querySelector('#wa-preview-box');
+      const summaryEl = bodyEl.querySelector('#wa-parse-summary');
+      const confirmBtn = bodyEl.querySelector('#btn-wa-confirm');
+
+      bodyEl.querySelector('#cancel-wa-import').addEventListener('click', closeModal);
+
+      bodyEl.querySelector('#btn-wa-parse').addEventListener('click', () => {
+        const raw = textEl.value.trim();
+        if (!raw) {
+          showToast('Cole o texto da escala do WhatsApp antes de analisar.', 'error');
+          return;
+        }
+        parsedEntries = parseWhatsAppScheduleText(raw, {
+          defaultYear: Number(yearEl.value) || 2026,
+          defaultPastoralId: pastoralEl.value,
+          pastorals,
+          locations,
+          celebrationTypes,
+          roles,
+          users,
+        });
+
+        if (parsedEntries.length === 0) {
+          previewBox.classList.add('hidden');
+          confirmBtn.disabled = true;
+          summaryEl.textContent = 'Nenhuma celebração reconhecida. Verifique se há dia (DD/MM) e horário (HHhMM).';
+          return;
+        }
+
+        const totalAsg = parsedEntries.reduce((s, e) => s + e.assignments.length, 0);
+        summaryEl.textContent = `${parsedEntries.length} ${parsedEntries.length === 1 ? 'celebração detectada' : 'celebrações detectadas'} • ${totalAsg} posições identificadas.`;
+        confirmBtn.disabled = totalAsg === 0;
+        previewBox.classList.remove('hidden');
+
+        previewBox.innerHTML = parsedEntries
+          .map((e) => {
+            const matchExisting = existingSchedules.find(
+              (s) => s.date === e.date && s.time === e.time && (s.locationId === e.locationId || normText(s.location) === normText(e.location)),
+            );
+            return `
+              <div class="rounded-xl border border-[#E6DACE] bg-[#FAF6F0] p-3 space-y-1.5 text-xs">
+                <div class="flex items-center justify-between gap-2 flex-wrap">
+                  <span class="font-extrabold text-[#3E2723]">${escapeHtml(formatDateBR(e.date))} às ${escapeHtml(e.time)} • ${escapeHtml(e.location)}</span>
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                    matchExisting ? 'bg-amber-100 text-[#92400E] border-amber-300' : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                  }">
+                    ${matchExisting ? 'Atualizar / Mesclar existente' : 'Nova escala'}
+                  </span>
+                </div>
+                <p class="text-[11px] text-[#6D4C41]">${escapeHtml(e.celebrationType)}</p>
+                <div class="flex items-center gap-1 flex-wrap">
+                  ${e.assignments
+                    .map(
+                      (a) =>
+                        `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white border border-[#E6DACE] text-[10px] font-semibold text-[#3E2723]">
+                          <span class="w-1.5 h-1.5 rounded-full" style="background-color:${escapeHtml(pastoralMap[a.pastoralId]?.color || '#B45309')}"></span>
+                          ${escapeHtml(a.displayName)} <span class="text-[#8D6E63]">(${escapeHtml(a.roleName)})</span>
+                        </span>`,
+                    )
+                    .join('')}
+                </div>
+                ${
+                  e.unmatched.length > 0
+                    ? `<p class="text-[11px] text-amber-800 font-semibold">Não encontrados no cadastro: ${escapeHtml(e.unmatched.join(', '))}</p>`
+                    : ''
+                }
+              </div>
+            `;
+          })
+          .join('');
+
+        refreshIcons();
+      });
+
+      confirmBtn.addEventListener('click', () => {
+        if (parsedEntries.length === 0) return;
+        const latestSchedules = dataService.getSchedules();
+        let savedCount = 0;
+
+        parsedEntries.forEach((e) => {
+          if (e.assignments.length === 0) return;
+          const existing = latestSchedules.find(
+            (s) => s.date === e.date && s.time === e.time && (s.locationId === e.locationId || normText(s.location) === normText(e.location)),
+          );
+          const baseAssignments = existing ? [...(existing.assignments || [])] : [];
+
+          e.assignments.forEach((a) => {
+            const already = baseAssignments.some(
+              (x) => x.userId === a.userId && (x.memberId || x.userId) === a.memberId && x.pastoralId === a.pastoralId && x.roleId === a.roleId,
+            );
+            if (!already) {
+              baseAssignments.push({
+                pastoralId: a.pastoralId,
+                roleId: a.roleId,
+                userId: a.userId,
+                memberId: a.memberId,
+              });
+            }
+          });
+
+          const notesJoined = [existing?.notes, ...e.notes].filter(Boolean).join(' | ');
+          dataService.saveSchedule({
+            id: existing?.id,
+            date: e.date,
+            time: e.time,
+            locationId: e.locationId,
+            location: e.location,
+            celebrationTypeId: existing?.celebrationTypeId || e.celebrationTypeId,
+            celebrationType: existing?.celebrationType || e.celebrationType,
+            pastoralId: existing?.pastoralId || baseAssignments[0].pastoralId,
+            eucharisticPrayerId: existing?.eucharisticPrayerId || 'oe_2',
+            eucharisticPrayerSource: existing?.eucharisticPrayerSource || 'default',
+            celebrantScript: existing?.celebrantScript || '',
+            notes: notesJoined,
+            assignments: baseAssignments,
+          });
+          savedCount += 1;
+        });
+
+        closeModal();
+        showToast(`${savedCount} ${savedCount === 1 ? 'escala importada' : 'escalas importadas'} com sucesso no Cloud Firestore!`);
+        onSaved();
       });
     },
   });

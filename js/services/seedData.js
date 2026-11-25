@@ -165,38 +165,39 @@ export function buildSeedData() {
   ];
 
   const locations = [
-    { id: 'loc_matriz', name: "Igreja Matriz Santa Teresa d'Ávila", type: 'Matriz', address: 'Praça Santa Teresa, 100 — Centro', active: true },
-    { id: 'loc_sao_francisco', name: 'Igreja São Francisco', type: 'Capela', address: 'Rua das Flores, 245 — Jardim São Francisco', active: true },
-    { id: 'loc_sao_jose', name: 'Capela São José', type: 'Capela', address: 'Av. dos Trabalhadores, 890 — Vila Nova', active: true },
-    { id: 'loc_salao', name: 'Salão Paroquial Santa Teresa', type: 'Salão', address: 'Anexo à Matriz — Entrada pela Rua Lateral', active: true },
-    { id: 'loc_externo', name: 'Praça da Matriz (Área Externa)', type: 'Externo', address: 'Em frente à escadaria principal da Matriz', active: false },
+    { id: 'loc_matriz', name: 'Matriz', type: 'Matriz', address: "Igreja Matriz Santa Teresa d'Ávila — Praça Santa Teresa, 100", active: true },
+    { id: 'loc_sao_francisco', name: 'Comunidade São Francisco', type: 'Capela', address: 'Comunidade São Francisco', active: true },
+    { id: 'loc_sav', name: 'Comunidade SAV', type: 'Capela', address: 'Comunidade SAV', active: true },
+    { id: 'loc_salao', name: 'Salão Paroquial Santa Teresa', type: 'Salão', address: 'Anexo à Matriz', active: true },
   ];
 
   const celebrationTypes = [
     { id: 'ct_dominical', name: 'Missa Dominical', color: '#B45309', durationMin: 75, requiresLiturgyOfWord: true, active: true },
     { id: 'ct_semanal', name: 'Missa Semanal', color: '#5D4037', durationMin: 60, requiresLiturgyOfWord: true, active: true },
-    { id: 'ct_solene', name: 'Missa Solene / Padroeira', color: '#991B1B', durationMin: 90, requiresLiturgyOfWord: true, active: true },
-    { id: 'ct_adoracao', name: 'Adoração ao Santíssimo', color: '#D97706', durationMin: 60, requiresLiturgyOfWord: false, active: true },
-    { id: 'ct_batizado', name: 'Batizado', color: '#0F766E', durationMin: 60, requiresLiturgyOfWord: true, active: true },
-    { id: 'ct_casamento', name: 'Casamento', color: '#881337', durationMin: 75, requiresLiturgyOfWord: true, active: true },
-    { id: 'ct_novena', name: 'Via-Sacra / Novena', color: '#6D28D9', durationMin: 45, requiresLiturgyOfWord: false, active: true },
+    { id: 'ct_sagrado', name: 'Missa do Sagrado', color: '#991B1B', durationMin: 75, requiresLiturgyOfWord: true, active: true },
+    { id: 'ct_novena', name: 'Novena de Santa Teresa', color: '#6D28D9', durationMin: 60, requiresLiturgyOfWord: true, active: true },
+    { id: 'ct_finados', name: 'Missa de Finados', color: '#4B5563', durationMin: 75, requiresLiturgyOfWord: true, active: true },
+    { id: 'ct_sav', name: 'Celebração SAV', color: '#0F766E', durationMin: 60, requiresLiturgyOfWord: true, active: true },
   ];
 
   const roles = [
-    // Coroinhas (6 funções)
+    // Coroinhas (7 funções)
     { id: 'role_cor_turibulo', pastoralId: 'pas_coroinhas', name: 'Turíbulo', description: 'Conduz o turíbulo nas incensações litúrgicas.', active: true },
     { id: 'role_cor_naveta', pastoralId: 'pas_coroinhas', name: 'Naveta', description: 'Auxilia com a naveta de incenso junto ao turíbulo.', active: true },
     { id: 'role_cor_cruz', pastoralId: 'pas_coroinhas', name: 'Cruz Processional', description: 'Abre a procissão de entrada e saída.', active: true },
     { id: 'role_cor_vela', pastoralId: 'pas_coroinhas', name: 'Vela/Tocha', description: 'Conduz as velas e tochas nas procissões e no Evangelho.', active: true },
     { id: 'role_cor_credencia', pastoralId: 'pas_coroinhas', name: 'Credência', description: 'Prepara vasos sagrados, galhetas e lavabo na credência.', active: true },
     { id: 'role_cor_altar', pastoralId: 'pas_coroinhas', name: 'Altar', description: 'Auxilia no serviço próximo ao altar e ao Missal.', active: true },
+    { id: 'role_cor_coord', pastoralId: 'pas_coroinhas', name: 'Coordenador de Escala / Plantão', description: 'Coordena e acompanha a equipe nesta celebração.', active: true },
 
-    // Acólitos (5 funções)
+    // Acólitos (7 funções)
     { id: 'role_aco_altar', pastoralId: 'pas_acolitos', name: 'Acólito do Altar', description: 'Serviço direto ao altar, preparação e purificação junto ao celebrante.', active: true },
     { id: 'role_aco_palavra', pastoralId: 'pas_acolitos', name: 'Acólito da Palavra', description: 'Serviço ao ambão, evangeliário e acompanhamento da Liturgia da Palavra.', active: true },
+    { id: 'role_aco_missal', pastoralId: 'pas_acolitos', name: 'Missal', description: 'Sustenta o Missal Romano junto ao celebrante.', active: true },
     { id: 'role_aco_turiferario', pastoralId: 'pas_acolitos', name: 'Turiferário', description: 'Condução solene do turíbulo nas celebrações.', active: true },
     { id: 'role_aco_cruciferario', pastoralId: 'pas_acolitos', name: 'Cruciferário', description: 'Condução da Cruz Processional nas entradas e procissões.', active: true },
     { id: 'role_aco_cerimoniario', pastoralId: 'pas_acolitos', name: 'Cerimoniário', description: 'Coordenação do rito litúrgico e orientação dos servidores no presbitério.', active: true },
+    { id: 'role_aco_coord', pastoralId: 'pas_acolitos', name: 'Coordenador de Escala / Plantão', description: 'Coordena e acompanha a equipe nesta celebração.', active: true },
 
     // Demais pastorais paroquiais
     { id: 'role_leitura1', pastoralId: 'pas_liturgia', name: '1ª Leitura', description: 'Proclamação da Primeira Leitura.', active: true },
@@ -217,7 +218,7 @@ export function buildSeedData() {
   ];
 
   const users = [
-    // Coordenação Geral Real
+    // Coordenação Geral Real + Coordenadora de Coroinhas e Acólitos
     {
       id: 'usr_natalia_admin',
       name: 'Natália Faria de Souza',
@@ -227,9 +228,60 @@ export function buildSeedData() {
       birthDate: '',
       isGeneralAdmin: true,
       status: 'Ativo',
-      memberships: [],
+      memberships: [
+        { pastoralId: 'pas_coroinhas', role: 'Coordenador' },
+        { pastoralId: 'pas_acolitos', role: 'Coordenador' },
+      ],
       integrantes: [{ id: 'usr_natalia_admin', name: 'Natália Faria de Souza', birthDate: '', pastoralId: '' }],
       familyMembers: [{ id: 'usr_natalia_admin', name: 'Natália Faria de Souza', birthDate: '', pastoralId: '' }],
+    },
+    {
+      id: 'usr_coord_gustavo',
+      name: 'Gustavo',
+      email: 'gustavo.coord@paroquia.com',
+      password: 'teresa123',
+      phone: '',
+      birthDate: '',
+      isGeneralAdmin: false,
+      status: 'Ativo',
+      memberships: [
+        { pastoralId: 'pas_coroinhas', role: 'Coordenador' },
+        { pastoralId: 'pas_acolitos', role: 'Coordenador' },
+      ],
+      integrantes: [{ id: 'usr_coord_gustavo', name: 'Gustavo', birthDate: '', pastoralId: '' }],
+      familyMembers: [{ id: 'usr_coord_gustavo', name: 'Gustavo', birthDate: '', pastoralId: '' }],
+    },
+    {
+      id: 'usr_coord_joaopedro',
+      name: 'João Pedro',
+      email: 'joaopedro.coord@paroquia.com',
+      password: 'teresa123',
+      phone: '',
+      birthDate: '',
+      isGeneralAdmin: false,
+      status: 'Ativo',
+      memberships: [
+        { pastoralId: 'pas_coroinhas', role: 'Coordenador' },
+        { pastoralId: 'pas_acolitos', role: 'Coordenador' },
+      ],
+      integrantes: [{ id: 'usr_coord_joaopedro', name: 'João Pedro', birthDate: '', pastoralId: '' }],
+      familyMembers: [{ id: 'usr_coord_joaopedro', name: 'João Pedro', birthDate: '', pastoralId: '' }],
+    },
+    {
+      id: 'usr_coord_michele',
+      name: 'Michele',
+      email: 'michele.coord@paroquia.com',
+      password: 'teresa123',
+      phone: '',
+      birthDate: '',
+      isGeneralAdmin: false,
+      status: 'Ativo',
+      memberships: [
+        { pastoralId: 'pas_coroinhas', role: 'Coordenador' },
+        { pastoralId: 'pas_acolitos', role: 'Coordenador' },
+      ],
+      integrantes: [{ id: 'usr_coord_michele', name: 'Michele', birthDate: '', pastoralId: '' }],
+      familyMembers: [{ id: 'usr_coord_michele', name: 'Michele', birthDate: '', pastoralId: '' }],
     },
 
     // --- Coroinhas: Individuais (16) ---
@@ -289,12 +341,24 @@ export function buildSeedData() {
     }),
 
     // --- Acólitos: Individuais (16) ---
-    makeIndividualUser({ id: 'usr_aco_milena', name: 'Milena', email: 'milena@paroquia.com', pastoralId: 'pas_acolitos' }),
+    {
+      ...makeIndividualUser({ id: 'usr_aco_milena', name: 'Milena', email: 'milena@paroquia.com', pastoralId: 'pas_acolitos' }),
+      memberships: [
+        { pastoralId: 'pas_coroinhas', role: 'Coordenador' },
+        { pastoralId: 'pas_acolitos', role: 'Coordenador' },
+      ],
+    },
     makeIndividualUser({ id: 'usr_aco_victoriah', name: 'Victória H', email: 'victoriah@paroquia.com', pastoralId: 'pas_acolitos' }),
     makeIndividualUser({ id: 'usr_aco_yasmin', name: 'Yasmin', email: 'yasmin@paroquia.com', pastoralId: 'pas_acolitos' }),
     makeIndividualUser({ id: 'usr_aco_alice', name: 'Alice (Acólitos)', email: 'alice.acolitos@paroquia.com', pastoralId: 'pas_acolitos' }),
-    makeIndividualUser({ id: 'usr_aco_kauan', name: 'Kauan', email: 'kauan@paroquia.com', pastoralId: 'pas_acolitos' }),
-    makeIndividualUser({ id: 'usr_aco_joseflavio', name: 'José Flavio', email: 'joseflavio@paroquia.com', pastoralId: 'pas_acolitos' }),
+    {
+      ...makeIndividualUser({ id: 'usr_aco_kauan', name: 'Kauan', email: 'kauan@paroquia.com', pastoralId: 'pas_acolitos' }),
+      memberships: [
+        { pastoralId: 'pas_coroinhas', role: 'Coordenador' },
+        { pastoralId: 'pas_acolitos', role: 'Coordenador' },
+      ],
+    },
+    makeIndividualUser({ id: 'usr_aco_joseflavio', name: 'José Flávio', email: 'joseflavio@paroquia.com', pastoralId: 'pas_acolitos' }),
     makeIndividualUser({ id: 'usr_aco_fabinho', name: 'Fabinho', email: 'fabinho@paroquia.com', pastoralId: 'pas_acolitos' }),
     makeIndividualUser({ id: 'usr_aco_ryan2', name: 'Ryan 2', email: 'ryan2@paroquia.com', pastoralId: 'pas_acolitos' }),
     makeIndividualUser({ id: 'usr_aco_lorenzo', name: 'Lorenzo', email: 'lorenzo@paroquia.com', pastoralId: 'pas_acolitos' }),
