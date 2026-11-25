@@ -46,12 +46,18 @@ export function renderMyDatesContent(targetEl, { user, onChanged, onNotification
       const pastoral = pastoralMap[asg.pastoralId] || pastoralMap[sch.pastoralId];
       const assignedName = resolveAssignedMemberName(userMap, asg.userId, asg.memberId);
       const personKey = asg.memberId || asg.userId;
+      const rName = roleMap[asg.roleId]?.name || 'Função';
+      const isCoordShift =
+        asg.roleId === 'role_cor_coord' ||
+        asg.roleId === 'role_aco_coord' ||
+        rName.toLowerCase().includes('coordenador');
       allMine.push({
         schedule: sch,
         assignment: asg,
         pastoral,
         assignedName,
-        roleName: roleMap[asg.roleId]?.name || 'Função',
+        roleName: rName,
+        isCoordShift,
         countdown: getCountdownBadge(sch.date),
         hasConflict: hasTimeConflict(slotIndex, personKey, sch.date, sch.time),
       });
@@ -131,7 +137,7 @@ export function renderMyDatesContent(targetEl, { user, onChanged, onNotification
           : `
         <div class="space-y-3.5">
           ${displayed
-            .map(({ schedule: sch, assignment: asg, pastoral, assignedName, roleName, countdown, hasConflict }) => {
+            .map(({ schedule: sch, assignment: asg, pastoral, assignedName, roleName, isCoordShift, countdown, hasConflict }) => {
               const isPast = countdown.diffDays < 0;
               return `
                 <article class="bg-white rounded-2xl border-2 ${
@@ -157,6 +163,13 @@ export function renderMyDatesContent(targetEl, { user, onChanged, onNotification
                           <i data-lucide="hourglass" class="w-3 h-3"></i>
                           ${escapeHtml(countdown.label)}
                         </span>
+                        ${
+                          isCoordShift
+                            ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-[#3E2723] text-amber-300 border border-amber-400/70">
+                                👑 Plantão de Coordenação
+                              </span>`
+                            : ''
+                        }
                         ${renderPastoralPill(pastoral, { compact: true })}
                         ${
                           isFam

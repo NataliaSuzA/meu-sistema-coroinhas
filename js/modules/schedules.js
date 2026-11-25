@@ -41,9 +41,23 @@ import {
 } from '../utils/helpers.js';
 
 let activeTab = 'my_dates';
+let selectedCoordinatorFilter = 'all';
+
+function isCoordinatorRole(roleId, roleMap = {}) {
+  if (!roleId) return false;
+  if (roleId === 'role_cor_coord' || roleId === 'role_aco_coord') return true;
+  const rName = String(roleMap[roleId]?.name || '').toLowerCase();
+  return rName.includes('coordenador');
+}
+
+function formatCoordinatorTitle(fullName) {
+  const first = getFirstName(fullName).toLowerCase();
+  return first.endsWith('a') ? 'Coordenadora' : 'Coordenador';
+}
 
 export function resetSchedulesTab() {
   activeTab = 'my_dates';
+  selectedCoordinatorFilter = 'all';
 }
 
 export function setSchedulesTab(tabId) {
@@ -72,7 +86,12 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
   const ctMap = Object.fromEntries(celebrationTypes.map((c) => [c.id, c]));
   const slotIndex = buildUserTimeSlotIndex(schedules);
 
-  if (activeTab !== 'my_dates' && activeTab !== 'all_managed' && !accessiblePastoralSet.has(activeTab)) {
+  if (
+    activeTab !== 'my_dates' &&
+    activeTab !== 'all_managed' &&
+    activeTab !== 'coordinators' &&
+    !accessiblePastoralSet.has(activeTab)
+  ) {
     activeTab = 'my_dates';
   }
   if (activeTab === 'all_managed' && !generalAdmin) {
@@ -80,8 +99,38 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
   }
 
   const selectedPastoral = pastoralMap[activeTab] || null;
-  const dynamicTitle = selectedPastoral ? selectedPastoral.name : 'Visão Geral das Pastorais';
+  const dynamicTitle =
+    activeTab === 'coordinators'
+      ? 'Escala de Coordenadores (Plantão)'
+      : selectedPastoral
+        ? selectedPastoral.name
+        : 'Visão Geral das Pastorais';
   setHeaderContext?.('Escalas', dynamicTitle);
+
+  const coordSchedulesAll = schedules.filter((sch) =>
+    (sch.assignments || []).some((a) => isCoordinatorRole(a.roleId, roleMap)),
+  );
+
+  // Lista de coordenadores presentes nos plantões para os chips de filtro rápido
+  const coordShiftCounts = new Map();
+  coordSchedulesAll.forEach((sch) => {
+    const seenInMass = new Set();
+    (sch.assignments || []).forEach((a) => {
+      if (!isCoordinatorRole(a.roleId, roleMap)) return;
+      if (seenInMass.has(a.userId)) return;
+      seenInMass.add(a.userId);
+      const name = resolveAssignedMemberName(userMap, a.userId, a.memberId);
+      const prev = coordShiftCounts.get(a.userId) || { userId: a.userId, name, count: 0 };
+      prev.count += 1;
+      coordShiftCounts.set(a.userId, prev);
+    });
+  });
+  const coordinatorFilterList = Array.from(coordShiftCounts.values()).sort((a, b) =>
+    a.name.localeCompare(b.name, 'pt-BR'),
+  );
+  if (selectedCoordinatorFilter !== 'all' && !coordShiftCounts.has(selectedCoordinatorFilter)) {
+    selectedCoordinatorFilter = 'all';
+  }
 
   const tabs = [
     { id: 'my_dates', label: 'Minhas Datas', icon: 'calendar-clock', managed: false },
@@ -92,6 +141,7 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
       color: p.color,
       managed: canCreateEdit && canManagePastoral(user, p.id),
     })),
+    { id: 'coordinators', label: 'Coordenadores', icon: 'crown', managed: false },
   ];
 
   const myAssignmentsCount = schedules.reduce(
@@ -101,6 +151,12 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
 
   const filtered = schedules.filter((sch) => {
     if (activeTab === 'all_managed') return true;
+    if (activeTab === 'coordinators') {
+      const coordAsgs = (sch.assignments || []).filter((a) => isCoordinatorRole(a.roleId, roleMap));
+      if (coordAsgs.length === 0) return false;
+      if (selectedCoordinatorFilter === 'all') return true;
+      return coordAsgs.some((a) => a.userId === selectedCoordinatorFilter);
+    }
     return sch.pastoralId === activeTab || (sch.assignments || []).some((a) => a.pastoralId === activeTab);
   });
 
@@ -211,23 +267,27 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
                 ? myAssignmentsCount
                 : t.id === 'all_managed'
                   ? schedules.length
-                  : schedules.filter((s) => s.pastoralId === t.id || (s.assignments || []).some((a) => a.pastoralId === t.id)).length;
+                  : t.id === 'coordinators'
+                    ? coordSchedulesAll.length
+                    : schedules.filter((s) => s.pastoralId === t.id || (s.assignments || []).some((a) => a.pastoralId === t.id)).length;
 
             return `
               <button type="button" data-tab="${t.id}"
                 class="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap border transition ${
                   isActive
                     ? 'bg-[#3E2723] text-white border-[#3E2723] shadow-sm'
-                    : 'bg-white text-[#5D4037] border-[#E6DACE] hover:border-[#D7C4B2] hover:bg-[#FDFBF7]'
+                    : t.id === 'coordinators'
+                      ? 'bg-amber-50/80 text-[#78350F] border-amber-300 hover:bg-amber-100/80'
+                      : 'bg-white text-[#5D4037] border-[#E6DACE] hover:border-[#D7C4B2] hover:bg-[#FDFBF7]'
                 }">
                 ${
                   t.color
                     ? `<span class="w-2.5 h-2.5 rounded-full shrink-0" style="background-color:${escapeHtml(t.color)};"></span>`
-                    : `<i data-lucide="${t.icon}" class="w-4 h-4 ${isActive ? 'text-amber-400' : 'text-[#8D6E63]'}"></i>`
+                    : `<i data-lucide="${t.icon}" class="w-4 h-4 ${isActive ? 'text-amber-400' : t.id === 'coordinators' ? 'text-[#B45309]' : 'text-[#8D6E63]'}"></i>`
                 }
                 ${escapeHtml(t.label)}
                 ${
-                  t.id !== 'my_dates' && t.id !== 'all_managed' && !generalAdmin
+                  t.id !== 'my_dates' && t.id !== 'all_managed' && t.id !== 'coordinators' && !generalAdmin
                     ? `<span class="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded font-bold ${
                         t.managed
                           ? isActive
@@ -247,6 +307,42 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
           })
           .join('')}
       </div>
+
+      <!-- Filtro rápido por Coordenador Responsável (na aba Coordenadores) -->
+      ${
+        activeTab === 'coordinators' && coordinatorFilterList.length > 0
+          ? `
+        <div class="bg-white rounded-2xl border border-amber-300/80 p-3.5 flex items-center gap-2 flex-wrap shadow-xs">
+          <span class="text-xs font-extrabold uppercase tracking-wider text-[#78350F] flex items-center gap-1.5 mr-1">
+            <i data-lucide="crown" class="w-3.5 h-3.5 text-[#D97706]"></i>
+            Filtrar por Coordenador(a):
+          </span>
+          <button type="button" data-coord-filter="all"
+            class="px-3 py-1.5 rounded-xl text-xs font-bold border transition ${
+              selectedCoordinatorFilter === 'all'
+                ? 'bg-[#3E2723] text-amber-300 border-[#3E2723]'
+                : 'bg-[#FAF6F0] text-[#5D4037] border-[#E6DACE] hover:bg-amber-50'
+            }">
+            Todos (${coordSchedulesAll.length})
+          </button>
+          ${coordinatorFilterList
+            .map(
+              (c) => `
+            <button type="button" data-coord-filter="${c.userId}"
+              class="px-3 py-1.5 rounded-xl text-xs font-bold border transition ${
+                selectedCoordinatorFilter === c.userId
+                  ? 'bg-[#B45309] text-white border-[#B45309]'
+                  : 'bg-white text-[#3E2723] border-[#E6DACE] hover:border-amber-300 hover:bg-amber-50/60'
+              }">
+              ${escapeHtml(c.name)} (${c.count})
+            </button>
+          `,
+            )
+            .join('')}
+        </div>
+      `
+          : ''
+      }
 
       <div id="schedules-tab-body"></div>
     </div>
@@ -293,6 +389,13 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
   container.querySelectorAll('[data-tab]').forEach((btn) => {
     btn.addEventListener('click', () => {
       activeTab = btn.dataset.tab;
+      renderSchedules(container, { user, setHeaderContext, permissions, openLiturgyFor, onNotificationsChanged });
+    });
+  });
+
+  container.querySelectorAll('[data-coord-filter]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      selectedCoordinatorFilter = btn.dataset.coordFilter;
       renderSchedules(container, { user, setHeaderContext, permissions, openLiturgyFor, onNotificationsChanged });
     });
   });
@@ -475,8 +578,12 @@ function renderScheduleCard(sch, { user, canCreateEdit, accessiblePastoralSet, u
 
         <div class="p-5 space-y-2.5">
           <p class="text-[11px] font-bold uppercase tracking-wider text-[#8D6E63]">Equipe Escalada</p>
-          ${(sch.assignments || [])
+          ${[
+            ...(sch.assignments || []).filter((a) => isCoordinatorRole(a.roleId, roleMap)),
+            ...(sch.assignments || []).filter((a) => !isCoordinatorRole(a.roleId, roleMap)),
+          ]
             .map((asg) => {
+              const isCoordShift = isCoordinatorRole(asg.roleId, roleMap);
               const memberAccount = userMap[asg.userId];
               const assignedName = resolveAssignedMemberName(userMap, asg.userId, asg.memberId);
               const isFamAcc = isFamilyAccount(memberAccount);
@@ -493,6 +600,112 @@ function renderScheduleCard(sch, { user, canCreateEdit, accessiblePastoralSet, u
                 !isMine &&
                 asg.substitutionRequested &&
                 (isGeneralAdmin(user) || accessiblePastoralSet.has(asgPastoralId));
+
+              if (isCoordShift) {
+                const coordLabel = formatCoordinatorTitle(assignedName);
+                return `
+                  <div class="rounded-xl p-3 border-2 ${
+                    asg.substitutionRequested
+                      ? 'bg-red-50/90 border-red-300'
+                      : 'bg-gradient-to-r from-[#3E2723] via-[#4E342E] to-[#5D4037] border-amber-400/80 text-white shadow-xs'
+                  }">
+                    <div class="flex items-center justify-between gap-2 flex-wrap">
+                      <div class="min-w-0 space-y-1">
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                          <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold ${
+                            asg.substitutionRequested
+                              ? 'bg-red-100 text-red-800 border border-red-300'
+                              : 'bg-amber-400 text-[#2B1B18]'
+                          }">
+                            👑 ${escapeHtml(coordLabel)}: ${escapeHtml(assignedName)}
+                          </span>
+                          <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                            asg.substitutionRequested
+                              ? 'bg-white text-[#5D4037] border border-[#E6DACE]'
+                              : 'bg-white/15 text-amber-200 border border-amber-300/30'
+                          }">
+                            Plantão da Missa
+                          </span>
+                          ${
+                            isMine
+                              ? `<span class="text-[10px] font-extrabold px-1.5 py-0.5 rounded ${
+                                  asg.substitutionRequested ? 'bg-amber-200 text-[#78350F]' : 'bg-white text-[#3E2723]'
+                                }">Você</span>`
+                              : ''
+                          }
+                        </div>
+                        ${
+                          asg.substitutionAccepted && asg.substitutedFromName
+                            ? `<p class="text-[11px] font-semibold text-emerald-300 flex items-center gap-1">
+                                <i data-lucide="arrow-left-right" class="w-3 h-3"></i>
+                                Substituindo ${escapeHtml(getFirstName(asg.substitutedFromName))}
+                              </p>`
+                            : ''
+                        }
+                      </div>
+
+                      <div class="flex items-center gap-1.5 flex-wrap">
+                        ${
+                          asg.substitutionRequested
+                            ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-700 border border-red-300">
+                                <i data-lucide="alert-circle" class="w-3 h-3"></i>
+                                Substituição Solicitada
+                              </span>`
+                            : asg.substitutionAccepted
+                              ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                  <i data-lucide="check-circle-2" class="w-3 h-3"></i>
+                                  Substituição Confirmada
+                                </span>`
+                              : ''
+                        }
+                        ${
+                          isMine && !asg.substitutionRequested && !isPast
+                            ? `<button type="button" data-request-sub="${asg.id}" data-schedule-id="${sch.id}"
+                                class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-[#3E2723] bg-amber-100 hover:bg-amber-200 border border-amber-300 transition">
+                                <i data-lucide="refresh-cw" class="w-3 h-3"></i>
+                                Solicitar Substituição
+                              </button>`
+                            : ''
+                        }
+                        ${
+                          isMine && asg.substitutionRequested && !isPast
+                            ? `<button type="button" data-cancel-sub="${asg.id}" data-schedule-id="${sch.id}"
+                                class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-[#5D4037] bg-white hover:bg-[#FAF6F0] border border-[#D7C4B2] transition">
+                                <i data-lucide="x-circle" class="w-3 h-3 text-red-600"></i>
+                                Cancelar Pedido
+                              </button>`
+                            : ''
+                        }
+                        ${
+                          canAcceptThis
+                            ? `<button type="button" data-accept-sub="${asg.id}" data-schedule-id="${sch.id}"
+                                class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-extrabold text-white bg-emerald-700 hover:bg-emerald-800 shadow-xs transition">
+                                <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i>
+                                Assumir / Aceitar
+                              </button>`
+                            : ''
+                        }
+                        ${
+                          canReassign && asg.substitutionRequested
+                            ? `<button type="button" data-reassign="${asg.id}" data-schedule-id="${sch.id}"
+                                class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-white bg-[#3E2723] hover:bg-[#5D4037] transition">
+                                <i data-lucide="user-check" class="w-3 h-3 text-amber-400"></i>
+                                Reatribuir
+                              </button>`
+                            : ''
+                        }
+                      </div>
+                    </div>
+                    ${
+                      asg.substitutionRequested && asg.substitutionReason
+                        ? `<p class="mt-2 text-xs text-red-800 bg-white/90 rounded-lg px-2.5 py-1.5 border border-red-200">
+                            <strong>Motivo:</strong> ${escapeHtml(asg.substitutionReason)}
+                          </p>`
+                        : ''
+                    }
+                  </div>
+                `;
+              }
 
               return `
                 <div class="rounded-xl p-3 border ${
