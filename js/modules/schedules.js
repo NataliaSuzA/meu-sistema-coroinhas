@@ -14,6 +14,7 @@ import { EUCHARISTIC_PRAYERS, getEucharisticPrayerById } from '../services/eucha
 import { evaluatePastoralAvailability } from '../services/availabilityService.js';
 import { renderMyDatesContent } from './myDates.js';
 import {
+  MONTHS_PT,
   buildUserTimeSlotIndex,
   canManagePastoral,
   canManageSchedule,
@@ -21,6 +22,7 @@ import {
   escapeHtml,
   findConflictsForMember,
   formatDateBR,
+  formatDateTimeBR,
   formatWeekdayBR,
   getAccountMembers,
   getCoordinatedPastoralIds,
@@ -44,6 +46,8 @@ import {
 
 let activeTab = 'my_dates';
 let selectedCoordinatorFilter = 'all';
+let subControlPeriodFilter = 'all';
+let subControlPastoralFilter = 'all';
 
 function isCoordinatorRole(roleId, roleMap = {}) {
   if (!roleId) return false;
@@ -60,6 +64,8 @@ function formatCoordinatorTitle(fullName) {
 export function resetSchedulesTab() {
   activeTab = 'my_dates';
   selectedCoordinatorFilter = 'all';
+  subControlPeriodFilter = 'all';
+  subControlPastoralFilter = 'all';
 }
 
 export function setSchedulesTab(tabId) {
@@ -93,6 +99,7 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
     activeTab !== 'my_dates' &&
     activeTab !== 'all_managed' &&
     activeTab !== 'coordinators' &&
+    activeTab !== 'substitutions' &&
     !accessiblePastoralSet.has(activeTab)
   ) {
     activeTab = 'my_dates';
@@ -100,18 +107,25 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
   if (activeTab === 'all_managed' && !generalAdmin) {
     activeTab = 'my_dates';
   }
-  if (activeTab === 'coordinators' && !isCoordOrAdmin) {
+  if ((activeTab === 'coordinators' || activeTab === 'substitutions') && !isCoordOrAdmin) {
     activeTab = 'my_dates';
   }
 
   const selectedPastoral = pastoralMap[activeTab] || null;
   const dynamicTitle =
-    activeTab === 'coordinators'
-      ? 'Escala de Coordenadores (Plantão)'
-      : selectedPastoral
-        ? selectedPastoral.name
-        : 'Visão Geral das Pastorais';
+    activeTab === 'substitutions'
+      ? 'Controle & Histórico de Trocas'
+      : activeTab === 'coordinators'
+        ? 'Escala de Coordenadores (Plantão)'
+        : selectedPastoral
+          ? selectedPastoral.name
+          : 'Visão Geral das Pastorais';
   setHeaderContext?.('Escalas', dynamicTitle);
+
+  const coordPastoralSet = new Set(coordPastoralIds);
+  const scopedSubstitutions = isCoordOrAdmin
+    ? dataService.getSubstitutions().filter((s) => generalAdmin || coordPastoralSet.has(s.pastoralId))
+    : [];
 
   const coordSchedulesAll = schedules.filter((sch) =>
     (sch.assignments || []).some((a) => isCoordinatorRole(a.roleId, roleMap)),
@@ -148,6 +162,7 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
       managed: canCreateEdit && canManagePastoral(user, p.id),
     })),
     ...(isCoordOrAdmin ? [{ id: 'coordinators', label: 'Coordenadores', icon: 'crown', managed: false }] : []),
+    ...(isCoordOrAdmin ? [{ id: 'substitutions', label: '🔄 Controle de Trocas', icon: 'arrow-left-right', managed: false }] : []),
   ];
 
   const myAssignmentsCount = schedules.reduce(
@@ -281,31 +296,33 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
                   ? schedules.length
                   : t.id === 'coordinators'
                     ? coordSchedulesAll.length
-                    : isCoordOrAdmin
-                      ? schedules.filter((s) => s.pastoralId === t.id || (s.assignments || []).some((a) => a.pastoralId === t.id)).length
-                      : schedules.filter((s) =>
-                          (s.assignments || []).some(
-                            (a) => !isCoordinatorRole(a.roleId, roleMap) && (a.pastoralId || s.pastoralId) === t.id,
-                          ),
-                        ).length;
+                    : t.id === 'substitutions'
+                      ? scopedSubstitutions.length
+                      : isCoordOrAdmin
+                        ? schedules.filter((s) => s.pastoralId === t.id || (s.assignments || []).some((a) => a.pastoralId === t.id)).length
+                        : schedules.filter((s) =>
+                            (s.assignments || []).some(
+                              (a) => !isCoordinatorRole(a.roleId, roleMap) && (a.pastoralId || s.pastoralId) === t.id,
+                            ),
+                          ).length;
 
             return `
               <button type="button" data-tab="${t.id}"
                 class="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap border transition ${
                   isActive
                     ? 'bg-[#3E2723] text-white border-[#3E2723] shadow-sm'
-                    : t.id === 'coordinators'
+                    : t.id === 'coordinators' || t.id === 'substitutions'
                       ? 'bg-amber-50/80 text-[#78350F] border-amber-300 hover:bg-amber-100/80'
                       : 'bg-white text-[#5D4037] border-[#E6DACE] hover:border-[#D7C4B2] hover:bg-[#FDFBF7]'
                 }">
                 ${
                   t.color
                     ? `<span class="w-2.5 h-2.5 rounded-full shrink-0" style="background-color:${escapeHtml(t.color)};"></span>`
-                    : `<i data-lucide="${t.icon}" class="w-4 h-4 ${isActive ? 'text-amber-400' : t.id === 'coordinators' ? 'text-[#B45309]' : 'text-[#8D6E63]'}"></i>`
+                    : `<i data-lucide="${t.icon}" class="w-4 h-4 ${isActive ? 'text-amber-400' : t.id === 'coordinators' || t.id === 'substitutions' ? 'text-[#B45309]' : 'text-[#8D6E63]'}"></i>`
                 }
                 ${escapeHtml(t.label)}
                 ${
-                  t.id !== 'my_dates' && t.id !== 'all_managed' && t.id !== 'coordinators' && !generalAdmin
+                  t.id !== 'my_dates' && t.id !== 'all_managed' && t.id !== 'coordinators' && t.id !== 'substitutions' && !generalAdmin
                     ? `<span class="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded font-bold ${
                         t.managed
                           ? isActive
@@ -374,6 +391,17 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
       compactHeader: true,
       openLiturgyFor,
       onChanged: rerender,
+    });
+  } else if (activeTab === 'substitutions' && isCoordOrAdmin) {
+    renderSubstitutionsControlPanel(tabBody, {
+      substitutions: scopedSubstitutions,
+      schedules,
+      pastorals: pastorals.filter((p) => generalAdmin || coordPastoralSet.has(p.id)),
+      pastoralMap,
+      roleMap,
+      generalAdmin,
+      coordPastoralSet,
+      onFilterChanged: () => renderSchedules(container, { user, setHeaderContext, permissions, openLiturgyFor, onNotificationsChanged }),
     });
   } else if (filtered.length === 0) {
     tabBody.innerHTML = `
@@ -663,10 +691,9 @@ function renderScheduleCard(sch, { user, isCoordOrAdmin = false, canCreateEdit, 
                           }
                         </div>
                         ${
-                          asg.substitutionAccepted && asg.substitutedFromName
-                            ? `<p class="text-[11px] font-semibold text-emerald-300 flex items-center gap-1">
-                                <i data-lucide="arrow-left-right" class="w-3 h-3"></i>
-                                Substituindo ${escapeHtml(getFirstName(asg.substitutedFromName))}
+                          isCoordOrAdmin && (asg.substituidoDe?.nome || (asg.substitutionAccepted && asg.substitutedFromName))
+                            ? `<p class="text-[11px] font-semibold text-amber-200 flex items-center gap-1">
+                                🔄 Cobrindo ${escapeHtml(asg.substituidoDe?.nome || asg.substitutedFromName)}
                               </p>`
                             : ''
                         }
@@ -780,10 +807,9 @@ function renderScheduleCard(sch, { user, isCoordOrAdmin = false, canCreateEdit, 
                           : ''
                       }
                       ${
-                        asg.substitutionAccepted && asg.substitutedFromName
+                        isCoordOrAdmin && (asg.substituidoDe?.nome || (asg.substitutionAccepted && asg.substitutedFromName))
                           ? `<p class="text-[11px] font-semibold text-emerald-800 flex items-center gap-1">
-                              <i data-lucide="arrow-left-right" class="w-3 h-3"></i>
-                              Substituindo ${escapeHtml(getFirstName(asg.substitutedFromName))}
+                              🔄 Cobrindo ${escapeHtml(asg.substituidoDe?.nome || asg.substitutedFromName)}
                             </p>`
                           : ''
                       }
@@ -1623,6 +1649,10 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
         row.dataset.subReason = preset?.substitutionReason || '';
         row.dataset.subAccepted = preset?.substitutionAccepted ? '1' : '0';
         row.dataset.subFrom = preset?.substitutedFromName || '';
+        row.dataset.subFromUid = preset?.substituidoDe?.userId || '';
+        row.dataset.subFromMid = preset?.substituidoDe?.memberId || '';
+        row.dataset.subFromNome = preset?.substituidoDe?.nome || '';
+        row.dataset.subRecId = preset?.substitutionRecordId || '';
         row.dataset.subAt = preset?.substitutedAt || '';
 
         row.innerHTML = `
@@ -1715,6 +1745,14 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
               substitutionReason: row.dataset.subReason || '',
               substitutionAccepted: row.dataset.subAccepted === '1',
               substitutedFromName: row.dataset.subFrom || '',
+              substituidoDe: row.dataset.subFromNome
+                ? {
+                    userId: row.dataset.subFromUid || '',
+                    memberId: row.dataset.subFromMid || '',
+                    nome: row.dataset.subFromNome,
+                  }
+                : null,
+              substitutionRecordId: row.dataset.subRecId || null,
               substitutedAt: row.dataset.subAt || null,
             });
           }
@@ -2293,5 +2331,444 @@ function openWhatsAppImportModal({ user }, onSaved) {
         onSaved();
       });
     },
+  });
+}
+
+// --- Controle, Histórico e Painel de Indicadores de Trocas/Substituições (Exclusivo Coordenação) ---
+
+function formatPeriodMonthLabel(yyyyMm) {
+  if (!yyyyMm || !/^\d{4}-\d{2}$/.test(yyyyMm)) return yyyyMm || '—';
+  const [y, m] = yyyyMm.split('-').map(Number);
+  const monthName = MONTHS_PT[m - 1] || String(m).padStart(2, '0');
+  return `${monthName}/${y}`;
+}
+
+function renderSubstitutionsControlPanel(
+  container,
+  { substitutions, schedules, pastorals, pastoralMap, roleMap, generalAdmin, coordPastoralSet, onFilterChanged },
+) {
+  // Opções de período (YYYY-MM) derivadas de escalas e substituições
+  const periodSet = new Set();
+  schedules.forEach((s) => {
+    if (s.date && /^\d{4}-\d{2}/.test(s.date)) periodSet.add(s.date.slice(0, 7));
+  });
+  substitutions.forEach((sub) => {
+    if (sub.dataMissa && /^\d{4}-\d{2}/.test(sub.dataMissa)) periodSet.add(sub.dataMissa.slice(0, 7));
+  });
+  const periodOptions = Array.from(periodSet).sort((a, b) => b.localeCompare(a));
+
+  if (subControlPeriodFilter !== 'all' && !periodSet.has(subControlPeriodFilter)) {
+    subControlPeriodFilter = 'all';
+  }
+  const managedIdsSet = new Set(pastorals.map((p) => p.id));
+  if (subControlPastoralFilter !== 'all' && !managedIdsSet.has(subControlPastoralFilter)) {
+    subControlPastoralFilter = 'all';
+  }
+
+  // Substituições filtradas por Período e Pastoral
+  const filteredSubs = substitutions
+    .filter((sub) => {
+      if (subControlPeriodFilter !== 'all' && !String(sub.dataMissa || '').startsWith(subControlPeriodFilter)) {
+        return false;
+      }
+      if (subControlPastoralFilter !== 'all' && sub.pastoralId !== subControlPastoralFilter) {
+        return false;
+      }
+      return true;
+    })
+    .sort((a, b) => String(b.criadoEm || '').localeCompare(String(a.criadoEm || '')));
+
+  // Total de escalações no período/pastoral para cálculo de percentuais
+  let totalAssignmentsInPeriod = 0;
+  const memberAssignmentsCount = new Map();
+  schedules.forEach((sch) => {
+    if (subControlPeriodFilter !== 'all' && !String(sch.date || '').startsWith(subControlPeriodFilter)) {
+      return;
+    }
+    (sch.assignments || []).forEach((asg) => {
+      const pid = asg.pastoralId || sch.pastoralId;
+      if (!generalAdmin && !coordPastoralSet.has(pid)) return;
+      if (subControlPastoralFilter !== 'all' && pid !== subControlPastoralFilter) return;
+      totalAssignmentsInPeriod += 1;
+      const key = asg.memberId || asg.userId;
+      memberAssignmentsCount.set(key, (memberAssignmentsCount.get(key) || 0) + 1);
+    });
+  });
+
+  const totalTrocas = filteredSubs.length;
+  const concluidas = filteredSubs.filter((s) => s.status === 'concluida');
+  const abertas = filteredSubs.filter((s) => s.status === 'aberta');
+  const canceladas = filteredSubs.filter((s) => s.status === 'cancelada');
+  const pctTrocasSobreEscalas =
+    totalAssignmentsInPeriod > 0
+      ? ((totalTrocas / totalAssignmentsInPeriod) * 100).toFixed(1).replace('.', ',')
+      : '0,0';
+
+  // Ranking 1: Quem Mais Solicita Trocas (pedidos abertos + concluídos; conta também se só houver cancelados? Mantém não-cancelados para justiça)
+  const requesterMap = new Map();
+  const concludedByRequester = new Map();
+  filteredSubs.forEach((sub) => {
+    if (sub.status === 'cancelada') return;
+    const personKey = sub.solicitanteMemberId || sub.solicitanteId || sub.solicitanteNome;
+    if (!personKey) return;
+    const prev = requesterMap.get(personKey) || {
+      key: personKey,
+      name: sub.solicitanteNome || 'Integrante',
+      pastoralId: sub.pastoralId,
+      pastoralNome: sub.pastoralNome || pastoralMap[sub.pastoralId]?.shortName || 'Pastoral',
+      count: 0,
+    };
+    prev.count += 1;
+    requesterMap.set(personKey, prev);
+    if (sub.status === 'concluida') {
+      concludedByRequester.set(personKey, (concludedByRequester.get(personKey) || 0) + 1);
+    }
+  });
+
+  const requesterRanking = Array.from(requesterMap.values())
+    .map((item) => {
+      // Quando uma troca é concluída, a vaga original saiu da escala atual do solicitante; somamos de volta para % real
+      const currentEscalas = memberAssignmentsCount.get(item.key) || 0;
+      const originalEscalas = currentEscalas + (concludedByRequester.get(item.key) || 0);
+      const denominator = Math.max(originalEscalas, item.count);
+      const pct = denominator > 0 ? Math.min(100, Math.round((item.count / denominator) * 100)) : 0;
+      return { ...item, totalEscalas: denominator, pct };
+    })
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'pt-BR'));
+
+  // Ranking 2: Quem Mais Vai no Lugar (Coberturas concluídas)
+  const helperMap = new Map();
+  concluidas.forEach((sub) => {
+    if (!sub.substitutoNome) return;
+    const personKey = sub.substitutoMemberId || sub.substitutoId || sub.substitutoNome;
+    const prev = helperMap.get(personKey) || {
+      key: personKey,
+      name: sub.substitutoNome,
+      pastoralId: sub.pastoralId,
+      pastoralNome: sub.pastoralNome || pastoralMap[sub.pastoralId]?.shortName || 'Pastoral',
+      count: 0,
+    };
+    prev.count += 1;
+    helperMap.set(personKey, prev);
+  });
+
+  const helperRanking = Array.from(helperMap.values()).sort(
+    (a, b) => b.count - a.count || a.name.localeCompare(b.name, 'pt-BR'),
+  );
+
+  const topRequester = requesterRanking[0] || null;
+  const topHelper = helperRanking[0] || null;
+  const maxReqCount = topRequester?.count || 1;
+  const maxHelpCount = topHelper?.count || 1;
+
+  container.innerHTML = `
+    <div id="substitutions-control-panel" class="space-y-6">
+      <!-- Barra de Filtros: Período e Pastoral -->
+      <div class="bg-white rounded-2xl border border-[#E6DACE] p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div class="flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded-xl bg-[#3E2723] text-amber-400 flex items-center justify-center shrink-0">
+            <i data-lucide="arrow-left-right" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h4 class="text-sm sm:text-base font-extrabold text-[#3E2723]">Controle &amp; Indicadores de Trocas</h4>
+            <p class="text-xs text-[#6D4C41]">Acompanhamento exclusivo da Coordenação com histórico permanente no Cloud Firestore.</p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2.5 flex-wrap">
+          <div class="flex items-center gap-1.5 bg-[#FAF6F0] border border-[#E6DACE] rounded-xl px-3 py-2">
+            <i data-lucide="calendar" class="w-3.5 h-3.5 text-[#B45309]"></i>
+            <select id="sub-ctrl-period-filter" aria-label="Filtrar trocas por mês/período"
+              class="text-xs sm:text-sm font-bold text-[#3E2723] bg-transparent outline-none cursor-pointer">
+              <option value="all" ${subControlPeriodFilter === 'all' ? 'selected' : ''}>Todos os períodos</option>
+              ${periodOptions
+                .map(
+                  (p) =>
+                    `<option value="${p}" ${subControlPeriodFilter === p ? 'selected' : ''}>${escapeHtml(formatPeriodMonthLabel(p))}</option>`,
+                )
+                .join('')}
+            </select>
+          </div>
+
+          <div class="flex items-center gap-1.5 bg-[#FAF6F0] border border-[#E6DACE] rounded-xl px-3 py-2">
+            <i data-lucide="layers" class="w-3.5 h-3.5 text-[#B45309]"></i>
+            <select id="sub-ctrl-pastoral-filter" aria-label="Filtrar trocas por pastoral"
+              class="text-xs sm:text-sm font-bold text-[#3E2723] bg-transparent outline-none cursor-pointer">
+              <option value="all" ${subControlPastoralFilter === 'all' ? 'selected' : ''}>Todas as pastorais</option>
+              ${pastorals
+                .map(
+                  (p) =>
+                    `<option value="${p.id}" ${subControlPastoralFilter === p.id ? 'selected' : ''}>${escapeHtml(p.shortName)}</option>`,
+                )
+                .join('')}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4 Cards de Resumo no Topo -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-white rounded-2xl border border-[#E6DACE] p-5 shadow-xs">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-[#6D4C41]">Total de Trocas</span>
+            <div class="w-9 h-9 rounded-xl bg-amber-50 text-[#B45309] flex items-center justify-center">
+              <i data-lucide="repeat" class="w-4 h-4"></i>
+            </div>
+          </div>
+          <p class="text-2xl font-extrabold text-[#3E2723] mt-2.5">${totalTrocas}</p>
+          <p class="text-xs text-[#6D4C41] mt-1">
+            <strong class="text-[#B45309]">${pctTrocasSobreEscalas}%</strong> sobre ${totalAssignmentsInPeriod} ${totalAssignmentsInPeriod === 1 ? 'escalação' : 'escalações'}
+          </p>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-[#E6DACE] p-5 shadow-xs">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-[#6D4C41]">Concluídas vs Em Aberto</span>
+            <div class="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
+              <i data-lucide="check-circle-2" class="w-4 h-4"></i>
+            </div>
+          </div>
+          <div class="flex items-baseline gap-2.5 mt-2.5">
+            <span class="text-2xl font-extrabold text-emerald-800">${concluidas.length}</span>
+            <span class="text-xs font-bold text-[#8D6E63]">cobertas</span>
+            <span class="text-[#D7C4B2]">•</span>
+            <span class="text-2xl font-extrabold ${abertas.length > 0 ? 'text-[#D97706]' : 'text-[#5D4037]'}">${abertas.length}</span>
+            <span class="text-xs font-bold text-[#8D6E63]">em aberto</span>
+          </div>
+          <p class="text-xs text-[#8D6E63] mt-1">
+            ${canceladas.length > 0 ? `${canceladas.length} ${canceladas.length === 1 ? 'cancelada' : 'canceladas'} no período` : 'Todas as trocas registradas'}
+          </p>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-amber-300/80 bg-gradient-to-br from-amber-50/50 to-white p-5 shadow-xs">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-[#92400E]">Quem Mais Pede Troca</span>
+            <div class="w-9 h-9 rounded-xl bg-amber-100 text-[#B45309] flex items-center justify-center">
+              <i data-lucide="user-minus" class="w-4 h-4"></i>
+            </div>
+          </div>
+          ${
+            topRequester
+              ? `
+            <p class="text-lg font-extrabold text-[#3E2723] mt-2.5 truncate" title="${escapeHtml(topRequester.name)}">${escapeHtml(topRequester.name)}</p>
+            <p class="text-xs text-[#6D4C41] mt-1">
+              <strong class="text-[#B45309]">${topRequester.count} ${topRequester.count === 1 ? 'pedido' : 'pedidos'}</strong> • ${escapeHtml(topRequester.pastoralNome)}
+            </p>
+          `
+              : `<p class="text-sm font-bold text-[#8D6E63] mt-3">Sem pedidos no período</p>`
+          }
+        </div>
+
+        <div class="bg-white rounded-2xl border border-emerald-300/80 bg-gradient-to-br from-emerald-50/50 to-white p-5 shadow-xs">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-emerald-900">Quem Mais Cobre / Ajuda</span>
+            <div class="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+              <i data-lucide="heart-handshake" class="w-4 h-4"></i>
+            </div>
+          </div>
+          ${
+            topHelper
+              ? `
+            <p class="text-lg font-extrabold text-[#3E2723] mt-2.5 truncate" title="${escapeHtml(topHelper.name)}">${escapeHtml(topHelper.name)}</p>
+            <p class="text-xs text-[#6D4C41] mt-1">
+              <strong class="text-emerald-800">${topHelper.count} ${topHelper.count === 1 ? 'cobertura' : 'coberturas'}</strong> • ${escapeHtml(topHelper.pastoralNome)}
+            </p>
+          `
+              : `<p class="text-sm font-bold text-[#8D6E63] mt-3">Sem coberturas no período</p>`
+          }
+        </div>
+      </div>
+
+      <!-- Dois Rankings Lado a Lado com Barras de Progresso -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <!-- Ranking: Quem Mais Solicita Trocas -->
+        <section class="bg-white rounded-2xl border border-[#E6DACE] p-5 shadow-xs space-y-4">
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <h5 class="text-sm sm:text-base font-extrabold text-[#3E2723]">Ranking: Quem Mais Solicita Trocas</h5>
+              <p class="text-xs text-[#6D4C41]">Total de pedidos e percentual sobre as próprias escalas</p>
+            </div>
+            <span class="px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-[#92400E] border border-amber-200">
+              ${requesterRanking.length} ${requesterRanking.length === 1 ? 'integrante' : 'integrantes'}
+            </span>
+          </div>
+
+          ${
+            requesterRanking.length === 0
+              ? `<p class="text-xs text-[#8D6E63] py-6 text-center bg-[#FAF6F0] rounded-xl border border-dashed border-[#D7C4B2]">Nenhuma solicitação registrada neste filtro.</p>`
+              : `
+            <div class="space-y-3">
+              ${requesterRanking
+                .slice(0, 10)
+                .map((item, idx) => {
+                  const barPct = Math.max(8, Math.round((item.count / maxReqCount) * 100));
+                  const pObj = pastoralMap[item.pastoralId];
+                  return `
+                    <div class="space-y-1.5">
+                      <div class="flex items-center justify-between gap-2 text-xs">
+                        <div class="flex items-center gap-2 min-w-0">
+                          <span class="w-5 h-5 rounded-md ${idx === 0 ? 'bg-[#D97706] text-white' : 'bg-[#F5EFE6] text-[#5D4037]'} flex items-center justify-center text-[10px] font-extrabold shrink-0">${idx + 1}º</span>
+                          <span class="font-bold text-[#3E2723] truncate">${escapeHtml(item.name)}</span>
+                          ${renderPastoralPill(pObj, { compact: true })}
+                        </div>
+                        <div class="text-right shrink-0 whitespace-nowrap">
+                          <span class="font-extrabold text-[#92400E]">${item.count} ${item.count === 1 ? 'pedido' : 'pedidos'}</span>
+                          <span class="text-[11px] text-[#8D6E63] ml-1">(${item.pct}% das escalas)</span>
+                        </div>
+                      </div>
+                      <div class="h-2 w-full rounded-full bg-[#F5EFE6] overflow-hidden">
+                        <div class="h-full rounded-full bg-gradient-to-r from-[#D97706] to-[#B45309] transition-all" style="width:${barPct}%"></div>
+                      </div>
+                    </div>
+                  `;
+                })
+                .join('')}
+            </div>
+          `
+          }
+        </section>
+
+        <!-- Ranking: Quem Mais Vai no Lugar (Coberturas) -->
+        <section class="bg-white rounded-2xl border border-[#E6DACE] p-5 shadow-xs space-y-4">
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <h5 class="text-sm sm:text-base font-extrabold text-[#3E2723]">Ranking: Quem Mais Vai no Lugar (Coberturas)</h5>
+              <p class="text-xs text-[#6D4C41]">Integrantes que mais assumiram vagas de colegas</p>
+            </div>
+            <span class="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+              ${helperRanking.length} ${helperRanking.length === 1 ? 'integrante' : 'integrantes'}
+            </span>
+          </div>
+
+          ${
+            helperRanking.length === 0
+              ? `<p class="text-xs text-[#8D6E63] py-6 text-center bg-[#FAF6F0] rounded-xl border border-dashed border-[#D7C4B2]">Nenhuma cobertura concluída neste filtro.</p>`
+              : `
+            <div class="space-y-3">
+              ${helperRanking
+                .slice(0, 10)
+                .map((item, idx) => {
+                  const barPct = Math.max(8, Math.round((item.count / maxHelpCount) * 100));
+                  const pObj = pastoralMap[item.pastoralId];
+                  return `
+                    <div class="space-y-1.5">
+                      <div class="flex items-center justify-between gap-2 text-xs">
+                        <div class="flex items-center gap-2 min-w-0">
+                          <span class="w-5 h-5 rounded-md ${idx === 0 ? 'bg-emerald-700 text-white' : 'bg-emerald-50 text-emerald-800'} flex items-center justify-center text-[10px] font-extrabold shrink-0">${idx + 1}º</span>
+                          <span class="font-bold text-[#3E2723] truncate">${escapeHtml(item.name)}</span>
+                          ${renderPastoralPill(pObj, { compact: true })}
+                        </div>
+                        <span class="font-extrabold text-emerald-800 shrink-0 whitespace-nowrap">
+                          ${item.count} ${item.count === 1 ? 'cobertura' : 'coberturas'}
+                        </span>
+                      </div>
+                      <div class="h-2 w-full rounded-full bg-emerald-50 overflow-hidden">
+                        <div class="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-700 transition-all" style="width:${barPct}%"></div>
+                      </div>
+                    </div>
+                  `;
+                })
+                .join('')}
+            </div>
+          `
+          }
+        </section>
+      </div>
+
+      <!-- Tabela Cronológica Completa de Trocas -->
+      <section class="bg-white rounded-2xl border border-[#E6DACE] shadow-xs overflow-hidden">
+        <div class="px-5 py-4 border-b border-[#E6DACE] bg-[#FDFBF7] flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <h5 class="text-sm sm:text-base font-extrabold text-[#3E2723]">Histórico Cronológico de Trocas (${filteredSubs.length})</h5>
+            <p class="text-xs text-[#6D4C41]">Registro permanente de pedidos abertos, concluídos e cancelados.</p>
+          </div>
+        </div>
+
+        ${
+          filteredSubs.length === 0
+            ? `
+          <div class="p-10 text-center">
+            <i data-lucide="history" class="w-9 h-9 text-[#8D6E63] mx-auto mb-2.5"></i>
+            <p class="text-sm font-bold text-[#3E2723]">Nenhuma troca registrada para este filtro</p>
+            <p class="text-xs text-[#6D4C41] mt-1">Quando um integrante solicitar ou aceitar uma substituição, o histórico completo aparecerá aqui automaticamente.</p>
+          </div>
+        `
+            : `
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="bg-[#FAF6F0] border-b border-[#E6DACE] text-[11px] font-bold uppercase tracking-wider text-[#6D4C41]">
+                  <th class="px-4 py-3 whitespace-nowrap">Data / Missa</th>
+                  <th class="px-4 py-3 whitespace-nowrap">Pastoral</th>
+                  <th class="px-4 py-3 whitespace-nowrap">Quem Pediu → Quem Cobriu</th>
+                  <th class="px-4 py-3 min-w-[180px]">Motivo</th>
+                  <th class="px-4 py-3 whitespace-nowrap">Status</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-[#E6DACE]/60 text-xs sm:text-sm">
+                ${filteredSubs
+                  .map((sub) => {
+                    const pObj = pastoralMap[sub.pastoralId];
+                    const statusBadge =
+                      sub.status === 'concluida'
+                        ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">✅ Concluída</span>`
+                        : sub.status === 'cancelada'
+                          ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-stone-100 text-stone-600 border border-stone-200">⚪ Cancelada</span>`
+                          : `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-amber-100 text-[#92400E] border border-amber-300">🟡 Em Aberto</span>`;
+
+                    const substituteHtml =
+                      sub.status === 'concluida' && sub.substitutoNome
+                        ? `<span class="font-extrabold text-emerald-800">${escapeHtml(sub.substitutoNome)}</span>`
+                        : sub.status === 'cancelada'
+                          ? `<span class="text-[#8D6E63] italic">Cancelado pelo solicitante</span>`
+                          : `<span class="text-[#B45309] font-semibold italic">Aguardando cobertura</span>`;
+
+                    return `
+                      <tr class="hover:bg-[#FAF6F0]/70 align-top">
+                        <td class="px-4 py-3 whitespace-nowrap">
+                          <p class="font-bold text-[#3E2723]">${escapeHtml(formatDateBR(sub.dataMissa))} às ${escapeHtml(sub.horarioMissa || '—')}</p>
+                          <p class="text-[11px] text-[#6D4C41]">${escapeHtml(sub.localMissa || '—')}</p>
+                        </td>
+                        <td class="px-4 py-3 whitespace-nowrap space-y-1">
+                          <div>${renderPastoralPill(pObj, { compact: true })}</div>
+                          <p class="text-[11px] font-semibold text-[#5D4037]">${escapeHtml(sub.funcao || 'Função')}</p>
+                        </td>
+                        <td class="px-4 py-3 whitespace-nowrap">
+                          <p class="text-xs sm:text-sm text-[#3E2723]">
+                            <strong class="text-[#5D4037]">${escapeHtml(sub.solicitanteNome || '—')}</strong>
+                            <span class="mx-1 text-[#B45309] font-bold">→</span>
+                            ${substituteHtml}
+                          </p>
+                          <p class="text-[10px] text-[#8D6E63] mt-0.5">
+                            Pedido: ${escapeHtml(formatDateTimeBR(sub.criadoEm))}${sub.concluidoEm ? ` • Fechado: ${escapeHtml(formatDateTimeBR(sub.concluidoEm))}` : ''}
+                          </p>
+                        </td>
+                        <td class="px-4 py-3 text-xs text-[#4E342E] leading-relaxed">
+                          ${escapeHtml(sub.motivo || '—')}
+                        </td>
+                        <td class="px-4 py-3 whitespace-nowrap">
+                          ${statusBadge}
+                        </td>
+                      </tr>
+                    `;
+                  })
+                  .join('')}
+              </tbody>
+            </table>
+          </div>
+        `
+        }
+      </section>
+    </div>
+  `;
+
+  container.querySelector('#sub-ctrl-period-filter')?.addEventListener('change', (e) => {
+    subControlPeriodFilter = e.target.value;
+    onFilterChanged?.();
+  });
+
+  container.querySelector('#sub-ctrl-pastoral-filter')?.addEventListener('change', (e) => {
+    subControlPastoralFilter = e.target.value;
+    onFilterChanged?.();
   });
 }

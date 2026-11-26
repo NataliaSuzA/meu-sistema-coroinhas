@@ -363,6 +363,8 @@ export const dataService = {
       substitutionReason: a.substitutionReason || '',
       substitutionAccepted: Boolean(a.substitutionAccepted),
       substitutedFromName: a.substitutedFromName || '',
+      substituidoDe: a.substituidoDe || null,
+      substitutionRecordId: a.substitutionRecordId || null,
       substitutedAt: a.substitutedAt || null,
     }));
 
@@ -394,19 +396,24 @@ export const dataService = {
     storageAdapter.removeDoc(COLLECTIONS.SCHEDULES, id);
   },
 
+  // --- Histórico Completo de Substituições (`substituicoes`) ---
+  getSubstitutions() {
+    return storageAdapter
+      .getCollection(COLLECTIONS.SUBSTITUTIONS)
+      .slice()
+      .sort((a, b) => String(b.criadoEm || '').localeCompare(String(a.criadoEm || '')));
+  },
+
+  deleteSubstitution(id) {
+    storageAdapter.removeDoc(COLLECTIONS.SUBSTITUTIONS, id);
+  },
+
   requestSubstitution(scheduleId, assignmentId, reason) {
     const sch = this.getScheduleById(scheduleId);
     if (!sch) return null;
     const assignments = (sch.assignments || []).map((a) => ({ ...a }));
     const asg = assignments.find((a) => a.id === assignmentId);
     if (!asg) return null;
-
-    asg.substitutionRequested = true;
-    asg.substitutionReason = reason.trim();
-    asg.substitutionAccepted = false;
-
-    const updatedSch = { ...sch, assignments };
-    const ops = [{ type: 'set', collection: COLLECTIONS.SCHEDULES, data: updatedSch }];
 
     const users = this.getUsers();
     const pastoralId = asg.pastoralId || sch.pastoralId;
@@ -416,6 +423,42 @@ export const dataService = {
     const dateBR = sch.date.split('-').reverse().join('/');
     const colleagues = this.getActiveUsersByPastoral(pastoralId).filter((u) => u.id !== asg.userId);
     const nowISO = new Date().toISOString();
+    const cleanReason = String(reason || '').trim();
+    const subId = genId('sub');
+
+    asg.substitutionRequested = true;
+    asg.substitutionReason = cleanReason;
+    asg.substitutionAccepted = false;
+    asg.substitutionRecordId = subId;
+
+    const updatedSch = { ...sch, assignments };
+    const subRecord = {
+      id: subId,
+      escalaId: sch.id,
+      assignmentId: asg.id,
+      dataMissa: sch.date,
+      horarioMissa: sch.time,
+      localMissa: sch.location || '',
+      tipoCelebracao: sch.celebrationType || '',
+      pastoralId,
+      pastoralNome: pastoral?.shortName || pastoral?.name || 'Pastoral',
+      funcao: role?.name || 'Função',
+      solicitanteId: asg.userId,
+      solicitanteMemberId: asg.memberId || asg.userId,
+      solicitanteNome: requesterName,
+      motivo: cleanReason,
+      substitutoId: null,
+      substitutoMemberId: null,
+      substitutoNome: null,
+      status: 'aberta',
+      criadoEm: nowISO,
+      concluidoEm: null,
+    };
+
+    const ops = [
+      { type: 'set', collection: COLLECTIONS.SCHEDULES, data: updatedSch },
+      { type: 'set', collection: COLLECTIONS.SUBSTITUTIONS, data: subRecord },
+    ];
 
     colleagues.forEach((col) => {
       ops.push({
@@ -449,11 +492,31 @@ export const dataService = {
     const asg = assignments.find((a) => a.id === assignmentId);
     if (!asg) return null;
 
+    const nowISO = new Date().toISOString();
+    const openRecord = this.getSubstitutions().find(
+      (s) =>
+        (asg.substitutionRecordId && s.id === asg.substitutionRecordId) ||
+        (s.escalaId === sch.id && s.assignmentId === asg.id && s.status === 'aberta'),
+    );
+
     asg.substitutionRequested = false;
     asg.substitutionReason = '';
+    asg.substitutionRecordId = null;
 
     const updatedSch = { ...sch, assignments };
     const ops = [{ type: 'set', collection: COLLECTIONS.SCHEDULES, data: updatedSch }];
+
+    if (openRecord) {
+      ops.push({
+        type: 'set',
+        collection: COLLECTIONS.SUBSTITUTIONS,
+        data: {
+          ...openRecord,
+          status: 'cancelada',
+          concluidoEm: nowISO,
+        },
+      });
+    }
 
     this.getNotifications().forEach((n) => {
       if (n.type === 'substitution_open' && n.assignmentId === assignmentId && !n.completed) {
@@ -478,24 +541,75 @@ export const dataService = {
 
     const users = this.getUsers();
     const prevUserId = asg.userId;
+    const prevMemberId = asg.memberId || asg.userId;
     const prevMemberName = resolveMemberNameFromList(users, asg.userId, asg.memberId);
-    const newMemberName = resolveMemberNameFromList(users, acceptorUserId, acceptorMemberId || acceptorUserId);
+    const prevReason = asg.substitutionReason || '';
+    const prevRecordId = asg.substitutionRecordId || null;
+    const newMemberId = acceptorMemberId || acceptorUserId;
+    const newMemberName = resolveMemberNameFromList(users, acceptorUserId, newMemberId);
     const pastoralId = asg.pastoralId || sch.pastoralId;
     const pastoral = this.getPastoralById(pastoralId);
     const role = this.getRoleById(asg.roleId);
     const dateBR = sch.date.split('-').reverse().join('/');
     const nowISO = new Date().toISOString();
 
+    const openRecord = this.getSubstitutions().find(
+      (s) =>
+        (prevRecordId && s.id === prevRecordId) ||
+        (s.escalaId === sch.id && s.assignmentId === asg.id && s.status === 'aberta'),
+    );
+
     asg.userId = acceptorUserId;
-    asg.memberId = acceptorMemberId || acceptorUserId;
+    asg.memberId = newMemberId;
     asg.substitutionRequested = false;
     asg.substitutionReason = '';
     asg.substitutionAccepted = true;
     asg.substitutedFromName = prevMemberName;
+    asg.substituidoDe = {
+      userId: prevUserId,
+      memberId: prevMemberId,
+      nome: prevMemberName,
+    };
+    asg.substitutionRecordId = null;
     asg.substitutedAt = nowISO;
 
     const updatedSch = { ...sch, assignments };
-    const ops = [{ type: 'set', collection: COLLECTIONS.SCHEDULES, data: updatedSch }];
+    const concludedRecord = openRecord
+      ? {
+          ...openRecord,
+          substitutoId: acceptorUserId,
+          substitutoMemberId: newMemberId,
+          substitutoNome: newMemberName,
+          status: 'concluida',
+          concluidoEm: nowISO,
+        }
+      : {
+          id: genId('sub'),
+          escalaId: sch.id,
+          assignmentId: asg.id,
+          dataMissa: sch.date,
+          horarioMissa: sch.time,
+          localMissa: sch.location || '',
+          tipoCelebracao: sch.celebrationType || '',
+          pastoralId,
+          pastoralNome: pastoral?.shortName || pastoral?.name || 'Pastoral',
+          funcao: role?.name || 'Função',
+          solicitanteId: prevUserId,
+          solicitanteMemberId: prevMemberId,
+          solicitanteNome: prevMemberName,
+          motivo: prevReason,
+          substitutoId: acceptorUserId,
+          substitutoMemberId: newMemberId,
+          substitutoNome: newMemberName,
+          status: 'concluida',
+          criadoEm: nowISO,
+          concluidoEm: nowISO,
+        };
+
+    const ops = [
+      { type: 'set', collection: COLLECTIONS.SCHEDULES, data: updatedSch },
+      { type: 'set', collection: COLLECTIONS.SUBSTITUTIONS, data: concludedRecord },
+    ];
 
     this.getNotifications().forEach((n) => {
       if (n.type === 'substitution_open' && n.assignmentId === assignmentId && !n.completed) {
@@ -554,7 +668,7 @@ export const dataService = {
     });
 
     storageAdapter.runBatch(ops);
-    return { schedule: updatedSch, prevMemberName, newMemberName };
+    return { schedule: updatedSch, prevMemberName, newMemberName, substitutionRecord: concludedRecord };
   },
 
   reassignScheduleMember(scheduleId, assignmentId, newUserId, newMemberId) {
@@ -565,18 +679,75 @@ export const dataService = {
     if (!asg) return null;
 
     const users = this.getUsers();
+    const prevUserId = asg.userId;
+    const prevMemberId = asg.memberId || asg.userId;
     const prevMemberName = resolveMemberNameFromList(users, asg.userId, asg.memberId);
+    const prevReason = asg.substitutionReason || 'Reatribuição pela Coordenação';
+    const prevRecordId = asg.substitutionRecordId || null;
+    const resolvedNewMemberId = newMemberId || newUserId;
+    const newMemberName = resolveMemberNameFromList(users, newUserId, resolvedNewMemberId);
+    const pastoralId = asg.pastoralId || sch.pastoralId;
+    const pastoral = this.getPastoralById(pastoralId);
+    const role = this.getRoleById(asg.roleId);
+    const nowISO = new Date().toISOString();
+
+    const openRecord = this.getSubstitutions().find(
+      (s) =>
+        (prevRecordId && s.id === prevRecordId) ||
+        (s.escalaId === sch.id && s.assignmentId === asg.id && s.status === 'aberta'),
+    );
 
     asg.userId = newUserId;
-    asg.memberId = newMemberId || newUserId;
+    asg.memberId = resolvedNewMemberId;
     asg.substitutionRequested = false;
     asg.substitutionReason = '';
     asg.substitutionAccepted = true;
     asg.substitutedFromName = prevMemberName;
-    asg.substitutedAt = new Date().toISOString();
+    asg.substituidoDe = {
+      userId: prevUserId,
+      memberId: prevMemberId,
+      nome: prevMemberName,
+    };
+    asg.substitutionRecordId = null;
+    asg.substitutedAt = nowISO;
 
     const updatedSch = { ...sch, assignments };
-    const ops = [{ type: 'set', collection: COLLECTIONS.SCHEDULES, data: updatedSch }];
+    const concludedRecord = openRecord
+      ? {
+          ...openRecord,
+          substitutoId: newUserId,
+          substitutoMemberId: resolvedNewMemberId,
+          substitutoNome: newMemberName,
+          status: 'concluida',
+          concluidoEm: nowISO,
+        }
+      : {
+          id: genId('sub'),
+          escalaId: sch.id,
+          assignmentId: asg.id,
+          dataMissa: sch.date,
+          horarioMissa: sch.time,
+          localMissa: sch.location || '',
+          tipoCelebracao: sch.celebrationType || '',
+          pastoralId,
+          pastoralNome: pastoral?.shortName || pastoral?.name || 'Pastoral',
+          funcao: role?.name || 'Função',
+          solicitanteId: prevUserId,
+          solicitanteMemberId: prevMemberId,
+          solicitanteNome: prevMemberName,
+          motivo: prevReason,
+          substitutoId: newUserId,
+          substitutoMemberId: resolvedNewMemberId,
+          substitutoNome: newMemberName,
+          status: 'concluida',
+          criadoEm: nowISO,
+          concluidoEm: nowISO,
+        };
+
+    const ops = [
+      { type: 'set', collection: COLLECTIONS.SCHEDULES, data: updatedSch },
+      { type: 'set', collection: COLLECTIONS.SUBSTITUTIONS, data: concludedRecord },
+    ];
 
     this.getNotifications().forEach((n) => {
       if (n.type === 'substitution_open' && n.assignmentId === assignmentId && !n.completed) {
