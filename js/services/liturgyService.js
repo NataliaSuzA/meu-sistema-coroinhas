@@ -388,7 +388,7 @@ export const liturgyService = {
       return memoryCache.get(isoDate);
     }
 
-    const sessionKey = `psta_liturgy_v5_${isoDate}`;
+    const sessionKey = `psta_liturgy_v6_${isoDate}`;
     try {
       const cached = sessionStorage.getItem(sessionKey);
       if (cached) {
@@ -401,34 +401,46 @@ export const liturgyService = {
     }
 
     const [ano, mes, dia] = isoDate.split('-');
-    const paulusUrl = `https://www.paulus.com.br/portal/liturgia-diaria/?ano=${encodeURIComponent(ano)}&mes=${encodeURIComponent(mes)}&dia=${encodeURIComponent(dia)}`;
     let result = null;
 
-    // 1) API Liturgia Diária v2 (CORS nativo e rápido, sem bloqueio de proxy no navegador)
+    // 1) Fonte Primária Oficial: Serverless Function Vercel `/api/liturgia-paulus` (Paulus direto sem CORS)
     try {
-      const rawApi = await fetchWithTimeout(
-        `https://liturgia.up.railway.app/v2/?dia=${encodeURIComponent(dia)}&mes=${encodeURIComponent(mes)}&ano=${encodeURIComponent(ano)}`,
-        6500,
-        true,
-      );
-      if (rawApi && (rawApi.leituras || rawApi.liturgia)) {
-        result = normalizeRailwayV2Backup(rawApi, isoDate);
-        result.sourceLabel = 'Fonte: Liturgia Diária Oficial (API v2)';
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 9000);
+      const apiRes = await fetch(`/api/liturgia-paulus?date=${encodeURIComponent(isoDate)}`, {
+        signal: controller.signal,
+        headers: { Accept: 'application/json' },
+      });
+      clearTimeout(timer);
+      const contentType = apiRes.headers.get('content-type') || '';
+      if (apiRes.ok && contentType.includes('application/json')) {
+        const payload = await apiRes.json();
+        if (payload?.ok && payload.data) {
+          const d = payload.data;
+          result = {
+            ...d,
+            source: 'paulus',
+            sourceLabel: '📖 Fonte: Liturgia Diária Oficial • Paulus',
+            defaultEucharisticPrayerId:
+              d.detectedOEId || getRecommendedEucharisticPrayerId(isoDate, d),
+          };
+        }
       }
     } catch {
-      // fallback silencioso
+      // fallback silencioso (ex: servidor estático local sem /api ou data futura ainda não publicada pela Paulus)
     }
 
-    // 2) Fallback: Paulus via AllOrigins CORS Proxy (apenas se a API primária não retornar)
+    // 2) Fallback Automático: API Liturgia Diária v2 (CORS nativo)
     if (!result) {
       try {
-        const json = await fetchWithTimeout(
-          `https://api.allorigins.win/get?url=${encodeURIComponent(paulusUrl)}`,
-          7000,
+        const rawApi = await fetchWithTimeout(
+          `https://liturgia.up.railway.app/v2/?dia=${encodeURIComponent(dia)}&mes=${encodeURIComponent(mes)}&ano=${encodeURIComponent(ano)}`,
+          6500,
           true,
         );
-        if (json && json.contents) {
-          result = parsePaulusHtml(json.contents, isoDate);
+        if (rawApi && (rawApi.leituras || rawApi.liturgia)) {
+          result = normalizeRailwayV2Backup(rawApi, isoDate);
+          result.sourceLabel = 'Fonte: Liturgia Diária (Fallback API v2)';
         }
       } catch {
         // fallback silencioso

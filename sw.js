@@ -1,8 +1,8 @@
 /**
- * Service Worker v16 — Gestão Pastoral - Paróquia Santa Teresa d'Ávila (Cloud Firestore)
+ * Service Worker v17 — Gestão Pastoral - Paróquia Santa Teresa d'Ávila (Cloud Firestore)
  */
 
-const CACHE_NAME = 'santa-teresa-pastoral-v16';
+const CACHE_NAME = 'santa-teresa-pastoral-v17';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -58,6 +58,8 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
+  // Nunca intercepta rotas de API Serverless (`/api/...`) no cache estático do Service Worker
+  if (url.pathname.startsWith('/api/')) return;
 
   event.respondWith(
     fetch(event.request)

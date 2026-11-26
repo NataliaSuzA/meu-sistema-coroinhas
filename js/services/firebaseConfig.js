@@ -7,6 +7,7 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebas
 import {
   EmailAuthProvider,
   createUserWithEmailAndPassword,
+  deleteUser,
   getAuth,
   onAuthStateChanged,
   reauthenticateWithCredential,
@@ -46,6 +47,7 @@ export {
   collection,
   createUserWithEmailAndPassword,
   deleteDoc,
+  deleteUser,
   doc,
   getDoc,
   getDocs,

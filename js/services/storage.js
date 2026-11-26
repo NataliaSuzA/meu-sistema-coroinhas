@@ -365,6 +365,8 @@ export const storageAdapter = {
       }
     });
     unsubscribers = [];
+    initialized = false;
+    connected = false;
   },
 
   /**

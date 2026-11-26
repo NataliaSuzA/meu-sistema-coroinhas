@@ -1,16 +1,21 @@
 /**
  * Serviço de Autenticação integrado ao Firebase Authentication (E-mail e Senha)
- * - Permite login normal com e-mail e senha cadastrados no Cloud Firestore
- * - Provisiona automaticamente a conta no Firebase Auth no primeiro acesso de
- *   usuários cadastrados pela Coordenação (ou pelo Seed inicial)
- * - Mantém fallback resiliente caso o provedor E-mail/Senha ainda não esteja
- *   habilitado no console do Firebase
+ * Compatível com regras blindadas de produção no Cloud Firestore (`request.auth != null`):
+ * - Autentica no Firebase Auth ANTES de abrir listeners ou ler coleções do Firestore
+ * - Provisiona automaticamente novos usuários cadastrados pela Coordenação no Firestore
+ *   no momento do primeiro acesso (verificando cadastro ativo + senha inicial e removendo
+ *   a conta temporária caso os dados não confiram)
+ * - Desconecta listeners do Firestore antes do signOut para evitar erros de permissão no logout
  */
 
 import {
   EmailAuthProvider,
   auth,
+  collection,
   createUserWithEmailAndPassword,
+  db,
+  deleteUser,
+  getDocs,
   reauthenticateWithCredential,
   signInWithEmailAndPassword,
   signOut,
@@ -18,96 +23,125 @@ import {
 } from './firebaseConfig.js';
 import { dataService } from './dataService.js';
 
-let authProviderActive = true;
-
-function isProviderDisabledError(err) {
-  const code = err?.code || '';
-  return (
-    code === 'auth/operation-not-allowed' ||
-    code === 'auth/configuration-not-found' ||
-    code === 'auth/admin-restricted-operation'
-  );
-}
-
 export const authService = {
-  isFirebaseAuthProviderActive() {
-    return authProviderActive;
+  /**
+   * Aguarda a restauração da sessão persistida no Firebase Authentication.
+   */
+  async waitForAuthReady() {
+    if (typeof auth.authStateReady === 'function') {
+      await auth.authStateReady();
+    }
+    return auth.currentUser || null;
+  },
+
+  getCurrentFirebaseUser() {
+    return auth.currentUser || null;
   },
 
   /**
-   * Realiza login validando o cadastro no Firestore e autenticando no Firebase Auth.
-   * Se o usuário foi cadastrado pela Coordenação no Firestore e está fazendo o primeiro
-   * acesso, cria automaticamente a credencial no Firebase Auth quando a senha confere.
+   * Realiza login autenticando no Firebase Auth primeiro (garantindo `request.auth != null`
+   * para as regras de produção do Cloud Firestore).
+   * Se o usuário acabou de ser cadastrado pela Coordenação e ainda não existe no Firebase Auth,
+   * provisiona e valida contra a coleção `users` antes de liberar o acesso.
    */
   async loginWithCredentials(rawEmail, rawPassword) {
     const email = String(rawEmail || '').trim().toLowerCase();
     const password = String(rawPassword || '');
-    const found = dataService.getUsers().find((u) => String(u.email || '').trim().toLowerCase() === email);
 
-    if (!found) {
+    if (!email || !password) {
       return {
         ok: false,
-        error: 'E-mail não encontrado. Verifique se digitou corretamente ou solicite seu cadastro à Coordenação.',
+        error: 'Informe seu e-mail e senha para entrar.',
       };
     }
-
-    if (found.status !== 'Ativo') {
-      return {
-        ok: false,
-        error: `Acesso indisponível: este usuário está com status "${found.status}".`,
-      };
-    }
-
-    const expectedPass = String(found.password || 'pastoral2026');
 
     // 1. Tenta autenticar diretamente no Firebase Authentication
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      authProviderActive = true;
-      return { ok: true, user: found, mode: 'firebase-auth' };
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+      return { ok: true, firebaseUser: cred.user, mode: 'firebase-auth' };
     } catch (err) {
-      // Se o provedor E-mail/Senha ainda não foi ativado no Console, valida contra o Firestore
-      if (isProviderDisabledError(err)) {
-        authProviderActive = false;
-        if (password !== expectedPass) {
-          return {
-            ok: false,
-            error: 'Senha incorreta. Verifique sua senha e tente novamente.',
-          };
-        }
-        return { ok: true, user: found, mode: 'firestore-fallback' };
+      const code = err?.code || '';
+      if (code === 'auth/invalid-email') {
+        return { ok: false, error: 'E-mail inválido. Verifique o endereço digitado.' };
+      }
+      if (code === 'auth/too-many-requests') {
+        return {
+          ok: false,
+          error: 'Muitas tentativas seguidas. Aguarde alguns instantes e tente novamente.',
+        };
       }
 
       // 2. Primeiro acesso de conta cadastrada pela Coordenação no Firestore:
-      //    se a senha digitada confere com a senha inicial cadastrada, provisiona no Firebase Auth
-      if (password === expectedPass) {
-        try {
-          await createUserWithEmailAndPassword(auth, email, password);
-          authProviderActive = true;
-          return { ok: true, user: found, mode: 'firebase-auth-provisioned' };
-        } catch (createErr) {
-          if (isProviderDisabledError(createErr)) {
-            authProviderActive = false;
-            return { ok: true, user: found, mode: 'firestore-fallback' };
-          }
-          if (createErr?.code === 'auth/email-already-in-use') {
-            return {
-              ok: false,
-              error: 'Senha incorreta. Caso tenha alterado sua senha anteriormente, utilize a nova senha.',
-            };
-          }
-          if (createErr?.code === 'auth/weak-password') {
-            // Senha cadastrada anteriormente com menos de 6 caracteres: permite entrar e orienta troca em Meu Perfil
-            return { ok: true, user: found, mode: 'firestore-fallback' };
-          }
-          return { ok: true, user: found, mode: 'firestore-fallback' };
-        }
+      //    tenta criar a credencial no Firebase Auth e valida imediatamente contra `users`
+      if (password.length < 6) {
+        return {
+          ok: false,
+          error: 'Senha incorreta. Verifique seus dados ou fale com a Coordenação.',
+        };
       }
 
-      return {
-        ok: false,
-        error: 'Senha incorreta. Verifique seus dados ou fale com a Coordenação.',
-      };
+      try {
+        const created = await createUserWithEmailAndPassword(auth, email, password);
+        try {
+          const snap = await getDocs(collection(db, 'users'));
+          const matchedDoc = snap.docs
+            .map((d) => ({ ...d.data(), id: d.data().id || d.id }))
+            .find((u) => String(u.email || '').trim().toLowerCase() === email);
+
+          if (!matchedDoc) {
+            await deleteUser(created.user).catch(() => {});
+            await signOut(auth).catch(() => {});
+            return {
+              ok: false,
+              error: 'E-mail não encontrado. Verifique se digitou corretamente ou solicite seu cadastro à Coordenação.',
+            };
+          }
+
+          if (matchedDoc.status !== 'Ativo') {
+            await deleteUser(created.user).catch(() => {});
+            await signOut(auth).catch(() => {});
+            return {
+              ok: false,
+              error: `Acesso indisponível: este usuário está com status "${matchedDoc.status}".`,
+            };
+          }
+
+          const expectedPass = String(matchedDoc.password || 'pastoral2026');
+          if (password !== expectedPass) {
+            await deleteUser(created.user).catch(() => {});
+            await signOut(auth).catch(() => {});
+            return {
+              ok: false,
+              error: 'Senha incorreta. Verifique seus dados ou fale com a Coordenação.',
+            };
+          }
+
+          return {
+            ok: true,
+            user: matchedDoc,
+            firebaseUser: created.user,
+            mode: 'firebase-auth-provisioned',
+          };
+        } catch {
+          await deleteUser(created.user).catch(() => {});
+          await signOut(auth).catch(() => {});
+          return {
+            ok: false,
+            error: 'Não foi possível validar seu cadastro no momento. Tente novamente.',
+          };
+        }
+      } catch (createErr) {
+        if (createErr?.code === 'auth/email-already-in-use') {
+          return {
+            ok: false,
+            error: 'Senha incorreta. Caso tenha alterado sua senha anteriormente, utilize a nova senha.',
+          };
+        }
+        return {
+          ok: false,
+          error: 'E-mail ou senha incorretos. Verifique seus dados ou fale com a Coordenação.',
+        };
+      }
     }
   },
 
@@ -121,35 +155,14 @@ export const authService = {
 
     let authenticatedInFirebase = false;
 
-    if (authProviderActive && email) {
+    if (email && auth.currentUser?.email?.toLowerCase() === email) {
       try {
-        if (auth.currentUser && auth.currentUser.email?.toLowerCase() === email) {
-          const cred = EmailAuthProvider.credential(email, currentPassword);
-          await reauthenticateWithCredential(auth.currentUser, cred);
-          await updatePassword(auth.currentUser, newPassword);
-          authenticatedInFirebase = true;
-        } else {
-          try {
-            const res = await signInWithEmailAndPassword(auth, email, currentPassword);
-            await updatePassword(res.user, newPassword);
-            authenticatedInFirebase = true;
-          } catch (signInErr) {
-            if (isProviderDisabledError(signInErr)) {
-              authProviderActive = false;
-            } else if (storedPass === currentPassword) {
-              try {
-                await createUserWithEmailAndPassword(auth, email, newPassword);
-                authenticatedInFirebase = true;
-              } catch (cErr) {
-                if (isProviderDisabledError(cErr)) authProviderActive = false;
-              }
-            }
-          }
-        }
+        const cred = EmailAuthProvider.credential(email, currentPassword);
+        await reauthenticateWithCredential(auth.currentUser, cred);
+        await updatePassword(auth.currentUser, newPassword);
+        authenticatedInFirebase = true;
       } catch (err) {
-        if (isProviderDisabledError(err)) {
-          authProviderActive = false;
-        } else if (err?.code === 'auth/wrong-password' || err?.code === 'auth/invalid-credential') {
+        if (err?.code === 'auth/wrong-password' || err?.code === 'auth/invalid-credential') {
           return { ok: false, error: 'A senha atual informada está incorreta.' };
         }
       }
@@ -159,28 +172,21 @@ export const authService = {
       return { ok: false, error: 'A senha atual informada está incorreta.' };
     }
 
-    // Sincroniza no Firestore (usando a senha atual armazenada para não falhar caso já tenha sido alterada no Auth)
     const updated = dataService.updateOwnPassword(fresh.id, storedPass, newPassword);
     return updated;
   },
 
   /**
-   * Sincroniza silenciosamente sessão do Firebase Auth ao alternar perfil (Admin Geral / localhost).
+   * Mantém a sessão autenticada do Firebase Auth intacta ao alternar visualização de perfil
+   * (exclusivo da Coordenação Geral / localhost), preservando `request.auth != null`.
    */
-  async syncDemoProfileSession(user) {
-    if (!authProviderActive || !user?.email) return;
-    try {
-      const email = String(user.email).trim().toLowerCase();
-      if (auth.currentUser?.email?.toLowerCase() === email) return;
-      await signInWithEmailAndPassword(auth, email, user.password || 'pastoral2026');
-    } catch (err) {
-      if (isProviderDisabledError(err)) {
-        authProviderActive = false;
-      }
-    }
+  async syncDemoProfileSession() {
+    // Mantém auth.currentUser ativo sem desconectar listeners do Firestore
   },
 
   async logout() {
+    // Desconecta listeners em tempo real ANTES de encerrar a sessão do Firebase Auth
+    dataService.detachListeners();
     dataService.setSessionUserId(null);
     try {
       await signOut(auth);

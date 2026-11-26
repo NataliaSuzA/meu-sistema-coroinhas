@@ -2,11 +2,64 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Regras iniciais para a plataforma Gestão Pastoral - Paróquia Santa Teresa d'Ávila
-    // Permite leitura/escrita para usuários autenticados e bootstrap inicial de demonstração.
-    // Em produção avançada, restrinja por request.auth != null e papéis no documento users/{uid}.
+    // Regras de Produção — Paróquia Santa Teresa d'Ávila • Gestão Pastoral
+    // Bloqueia qualquer leitura ou escrita externa/não autenticada.
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    match /users/{docId} {
+      allow read, write: if isSignedIn();
+    }
+    match /pastorais/{docId} {
+      allow read, write: if isSignedIn();
+    }
+    match /funcoes/{docId} {
+      allow read, write: if isSignedIn();
+    }
+    match /locais/{docId} {
+      allow read, write: if isSignedIn();
+    }
+    match /tiposCelebracao/{docId} {
+      allow read, write: if isSignedIn();
+    }
+    match /escalas/{docId} {
+      allow read, write: if isSignedIn();
+    }
+    match /substituicoes/{docId} {
+      allow read, write: if isSignedIn();
+    }
+    match /eventos/{docId} {
+      allow read, write: if isSignedIn();
+    }
+    match /formularios/{docId} {
+      allow read, write: if isSignedIn();
+    }
+    match /respostas/{docId} {
+      allow read, write: if isSignedIn();
+    }
+    match /presencas/{docId} {
+      allow read, write: if isSignedIn();
+    }
+    match /notas/{docId} {
+      allow read, write: if isSignedIn();
+    }
+    match /avisos/{docId} {
+      allow read, write: if isSignedIn();
+    }
+    match /aniversariosParabens/{docId} {
+      allow read, write: if isSignedIn();
+    }
+    match /notificacoes/{docId} {
+      allow read, write: if isSignedIn();
+    }
+    match /configuracoes/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Negação padrão para qualquer outro caminho não autorizado
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }

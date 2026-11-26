@@ -53,6 +53,10 @@ export const dataService = {
     await storageAdapter.initRealtime(buildSeedData, onRealtimeUpdate);
   },
 
+  detachListeners() {
+    storageAdapter.detachListeners();
+  },
+
   getSyncStatus() {
     return storageAdapter.getSyncStatus();
   },

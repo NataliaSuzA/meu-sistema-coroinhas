@@ -163,7 +163,7 @@ export async function renderLiturgy(container, { user }) {
                 Cor Litúrgica: ${escapeHtml(colorStyle.label)}
               </span>
               <span class="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-0.5 rounded-full border ${sourceBadgeClass}">
-                <i data-lucide="book-open" class="w-3 h-3"></i>
+                ${liturgy.source === 'paulus' ? '' : '<i data-lucide="book-open" class="w-3 h-3"></i>'}
                 ${escapeHtml(liturgy.sourceLabel)}
               </span>
             </div>

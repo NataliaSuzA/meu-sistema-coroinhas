@@ -223,6 +223,20 @@ function handleRealtimeFirestoreSync() {
   }
 }
 
+async function connectFirestoreAndSyncStatus(bootMsg = null) {
+  if (bootMsg) bootMsg.textContent = 'Conectando ao Cloud Firestore em tempo real...';
+  await dataService.init(handleRealtimeFirestoreSync);
+
+  const syncEl = document.getElementById('firebase-sync-status');
+  const status = dataService.getSyncStatus();
+  if (syncEl && status.connected) {
+    syncEl.innerHTML = `
+      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
+      <span class="text-[10px] font-bold tracking-wide text-emerald-300 truncate">Cloud Firestore • Protegido</span>
+    `;
+  }
+}
+
 async function init() {
   registerServiceWorker();
   setupPwaInstall();
@@ -232,30 +246,45 @@ async function init() {
   const bootMsg = document.getElementById('firebase-boot-message');
 
   try {
-    if (bootMsg) bootMsg.textContent = 'Conectando ao Cloud Firestore em tempo real...';
-    await dataService.init(handleRealtimeFirestoreSync);
+    if (bootMsg) bootMsg.textContent = 'Verificando sessão autenticada no Firebase...';
+    const firebaseUser = await authService.waitForAuthReady();
+
+    if (!firebaseUser) {
+      if (bootEl) bootEl.classList.add('hidden');
+      showLoginScreen();
+      return;
+    }
+
+    await connectFirestoreAndSyncStatus(bootMsg);
+    if (bootEl) bootEl.classList.add('hidden');
+
+    const fbEmail = String(firebaseUser.email || '').trim().toLowerCase();
+    const allUsers = dataService.getUsers();
+    const authMatchedUser = allUsers.find(
+      (u) => String(u.email || '').trim().toLowerCase() === fbEmail,
+    );
+    const savedUserId = dataService.getSessionUserId();
+    const savedUser = savedUserId ? dataService.getUserById(savedUserId) : null;
+
+    // Permite manter perfil alternado apenas se a sessão autenticada for Admin Geral (ou localhost)
+    const canRestoreSwitched =
+      savedUser &&
+      savedUser.status === 'Ativo' &&
+      (savedUser.id === authMatchedUser?.id ||
+        isGeneralAdmin(authMatchedUser) ||
+        isLocalDevEnvironment());
+
+    const targetUser = canRestoreSwitched ? savedUser : authMatchedUser;
+
+    if (targetUser && targetUser.status === 'Ativo') {
+      loginAs(targetUser, { silent: true });
+    } else {
+      await authService.logout();
+      showLoginScreen();
+    }
   } catch (err) {
     console.warn('[Firebase] Falha na inicialização:', err?.message || err);
-    if (bootMsg) bootMsg.textContent = 'Erro ao conectar ao Firebase. Recarregue a página.';
-  }
-
-  if (bootEl) bootEl.classList.add('hidden');
-
-  const syncEl = document.getElementById('firebase-sync-status');
-  const status = dataService.getSyncStatus();
-  if (syncEl && status.connected) {
-    syncEl.innerHTML = `
-      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
-      <span class="text-[10px] font-bold tracking-wide text-emerald-300 truncate">Cloud Firestore • Tempo Real</span>
-    `;
-  }
-
-  const savedUserId = dataService.getSessionUserId();
-  const savedUser = savedUserId ? dataService.getUserById(savedUserId) : null;
-
-  if (savedUser && savedUser.status === 'Ativo') {
-    loginAs(savedUser, { silent: true });
-  } else {
+    if (bootEl) bootEl.classList.add('hidden');
     showLoginScreen();
   }
 }
@@ -468,17 +497,44 @@ function bindGlobalEvents() {
     const submitBtn = e.target.querySelector('button[type="submit"]');
     if (submitBtn) submitBtn.disabled = true;
 
-    const result = await authService.loginWithCredentials(email, password);
-    if (submitBtn) submitBtn.disabled = false;
+    try {
+      const result = await authService.loginWithCredentials(email, password);
+      if (!result.ok) {
+        errorEl.textContent = result.error;
+        errorEl.classList.remove('hidden');
+        return;
+      }
 
-    if (!result.ok) {
-      errorEl.textContent = result.error;
+      // Agora com `request.auth != null` garantido, conecta às coleções protegidas do Firestore
+      await connectFirestoreAndSyncStatus();
+
+      const matchedUser =
+        dataService
+          .getUsers()
+          .find((u) => String(u.email || '').trim().toLowerCase() === email) || result.user;
+
+      if (!matchedUser) {
+        await authService.logout();
+        errorEl.textContent = 'Usuário autenticado não encontrado no cadastro da paróquia. Fale com a Coordenação.';
+        errorEl.classList.remove('hidden');
+        return;
+      }
+
+      if (matchedUser.status !== 'Ativo') {
+        await authService.logout();
+        errorEl.textContent = `Acesso indisponível: este usuário está com status "${matchedUser.status}".`;
+        errorEl.classList.remove('hidden');
+        return;
+      }
+
+      errorEl.classList.add('hidden');
+      loginAs(matchedUser);
+    } catch {
+      errorEl.textContent = 'Erro ao conectar ao servidor. Tente novamente em instantes.';
       errorEl.classList.remove('hidden');
-      return;
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
     }
-
-    errorEl.classList.add('hidden');
-    loginAs(result.user);
   });
 }
 
@@ -503,7 +559,10 @@ function showLoginScreen() {
 
   const quickSection = document.getElementById('login-quick-profiles-section');
   const quickBox = document.getElementById('login-quick-profiles');
-  const allowQuickLogin = isLocalDevEnvironment();
+  const allowQuickLogin =
+    isLocalDevEnvironment() &&
+    Boolean(authService.getCurrentFirebaseUser()) &&
+    dataService.getUsers().length > 0;
 
   if (quickSection) {
     quickSection.classList.toggle('hidden', !allowQuickLogin);
