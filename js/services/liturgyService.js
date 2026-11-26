@@ -404,53 +404,38 @@ export const liturgyService = {
     const paulusUrl = `https://www.paulus.com.br/portal/liturgia-diaria/?ano=${encodeURIComponent(ano)}&mes=${encodeURIComponent(mes)}&dia=${encodeURIComponent(dia)}`;
     let result = null;
 
-    // 1) Paulus via AllOrigins CORS Proxy
+    // 1) API Liturgia Diária v2 (CORS nativo e rápido, sem bloqueio de proxy no navegador)
     try {
-      const json = await fetchWithTimeout(
-        `https://api.allorigins.win/get?url=${encodeURIComponent(paulusUrl)}`,
-        7000,
+      const rawApi = await fetchWithTimeout(
+        `https://liturgia.up.railway.app/v2/?dia=${encodeURIComponent(dia)}&mes=${encodeURIComponent(mes)}&ano=${encodeURIComponent(ano)}`,
+        6500,
         true,
       );
-      if (json && json.contents) {
-        result = parsePaulusHtml(json.contents, isoDate);
+      if (rawApi && (rawApi.leituras || rawApi.liturgia)) {
+        result = normalizeRailwayV2Backup(rawApi, isoDate);
+        result.sourceLabel = 'Fonte: Liturgia Diária Oficial (API v2)';
       }
     } catch {
       // fallback silencioso
     }
 
-    // 2) Paulus via corsproxy.io
+    // 2) Fallback: Paulus via AllOrigins CORS Proxy (apenas se a API primária não retornar)
     if (!result) {
       try {
-        const html = await fetchWithTimeout(
-          `https://corsproxy.io/?${encodeURIComponent(paulusUrl)}`,
+        const json = await fetchWithTimeout(
+          `https://api.allorigins.win/get?url=${encodeURIComponent(paulusUrl)}`,
           7000,
-          false,
-        );
-        if (html) {
-          result = parsePaulusHtml(html, isoDate);
-        }
-      } catch {
-        // fallback silencioso
-      }
-    }
-
-    // 3) Backup Automático: API Liturgia Diária v2
-    if (!result) {
-      try {
-        const rawBackup = await fetchWithTimeout(
-          `https://liturgia.up.railway.app/v2/?dia=${encodeURIComponent(dia)}&mes=${encodeURIComponent(mes)}&ano=${encodeURIComponent(ano)}`,
-          6500,
           true,
         );
-        if (rawBackup && (rawBackup.leituras || rawBackup.liturgia)) {
-          result = normalizeRailwayV2Backup(rawBackup, isoDate);
+        if (json && json.contents) {
+          result = parsePaulusHtml(json.contents, isoDate);
         }
       } catch {
         // fallback silencioso
       }
     }
 
-    // 4) Referência offline local
+    // 3) Referência offline local
     if (!result) {
       result = buildOfflineFallbackLiturgy(isoDate);
     }

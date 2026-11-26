@@ -11,6 +11,7 @@
 import { dataService } from '../services/dataService.js';
 import { liturgyService } from '../services/liturgyService.js';
 import { EUCHARISTIC_PRAYERS, getEucharisticPrayerById } from '../services/eucharisticPrayers.js';
+import { evaluatePastoralAvailability } from '../services/availabilityService.js';
 import { renderMyDatesContent } from './myDates.js';
 import {
   buildUserTimeSlotIndex,
@@ -984,6 +985,10 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
   }
 
   const allSchedules = dataService.getSchedules();
+  const allForms = dataService.getForms();
+  const allResponses = dataService.getResponses();
+  const allLocations = dataService.getLocations();
+  const locationMap = Object.fromEntries(allLocations.map((l) => [l.id, l]));
   const pastoralMap = Object.fromEntries(allActivePastorals.map((p) => [p.id, p]));
   const roleMap = Object.fromEntries(dataService.getRoles().map((r) => [r.id, r]));
   const userMap = Object.fromEntries(dataService.getUsers().map((u) => [u.id, u]));
@@ -1012,7 +1017,7 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
           <div>
             <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Local (Apenas Ativos) *</label>
-            <select name="locationId" required class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm bg-white focus:border-[#B45309] outline-none">
+            <select id="sch-location-select" name="locationId" required class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm bg-white focus:border-[#B45309] outline-none">
               ${activeLocations
                 .map(
                   (loc) =>
@@ -1033,6 +1038,9 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
             </select>
           </div>
         </div>
+
+        <!-- Contador Rápido de Disponibilidade (Cruzamento Automático com Formulários) -->
+        <div id="schedule-availability-banner" class="hidden rounded-2xl border p-3.5 text-xs space-y-2"></div>
 
         <!-- Bloco Integrado: Liturgia do Dia + Oração Eucarística + Roteiro do Celebrante -->
         <div class="p-4 rounded-2xl bg-[#FAF6F0] border border-[#E6DACE] space-y-3">
@@ -1077,13 +1085,19 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
           <div class="flex items-center justify-between gap-2 mb-2.5 flex-wrap">
             <div>
               <label class="text-xs font-bold uppercase tracking-wider text-[#3E2723]">Posições da Escala (Filtro Cascata)</label>
-              <p class="text-[11px] text-[#6D4C41]">1. <strong>Pastoral</strong> → 2. <strong>Função ativa</strong> → 3. <strong>Integrante ativo</strong> (irmãos de contas familiares listados individualmente).</p>
+              <p class="text-[11px] text-[#6D4C41]">1. <strong>Pastoral</strong> → 2. <strong>Função ativa</strong> → 3. <strong>Integrante ativo</strong> (cruzamento automático com Formulários e Contas Familiares).</p>
             </div>
             <button id="btn-add-position-row" type="button"
               class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 text-[#92400E] border border-amber-300 transition">
               <i data-lucide="plus" class="w-3.5 h-3.5"></i>
               Adicionar Posição
             </button>
+          </div>
+          <div id="schedule-show-all-wrap" class="hidden mb-2.5">
+            <label class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-[#FAF6F0] border border-[#E6DACE] text-xs font-medium text-[#5D4037] hover:bg-amber-50/70 cursor-pointer select-none transition">
+              <input id="sch-show-unavailable" type="checkbox" class="rounded text-[#B45309] focus:ring-[#B45309]">
+              <span>Mostrar também integrantes indisponíveis ou sem resposta no formulário</span>
+            </label>
           </div>
           <div id="positions-list" class="space-y-2.5"></div>
         </div>
@@ -1103,10 +1117,114 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
       const listEl = bodyEl.querySelector('#positions-list');
       const dateInput = bodyEl.querySelector('#sch-date-input');
       const timeInput = bodyEl.querySelector('#sch-time-input');
+      const locationSelect = bodyEl.querySelector('#sch-location-select');
       const oeSelect = bodyEl.querySelector('#sch-oe-select');
       const oeBadge = bodyEl.querySelector('#sch-oe-badge');
       const litPreview = bodyEl.querySelector('#sch-liturgy-preview');
       const conflictBanner = bodyEl.querySelector('#schedule-conflict-banner');
+      const availabilityBanner = bodyEl.querySelector('#schedule-availability-banner');
+      const showAllWrap = bodyEl.querySelector('#schedule-show-all-wrap');
+      const showUnavailableChk = bodyEl.querySelector('#sch-show-unavailable');
+
+      function computeAvailabilityByPastoral() {
+        const date = dateInput.value;
+        const time = timeInput.value;
+        const locationId = locationSelect?.value || '';
+        const locationName = locationMap[locationId]?.name || existing?.location || '';
+        const map = new Map();
+
+        allActivePastorals.forEach((p) => {
+          const participants = dataService.getActiveParticipantsByPastoral(p.id);
+          const result = evaluatePastoralAvailability({
+            pastoralId: p.id,
+            date,
+            time,
+            locationId,
+            locationName,
+            forms: allForms,
+            responses: allResponses,
+            participants,
+            locations: allLocations,
+          });
+          map.set(p.id, result);
+        });
+        return map;
+      }
+
+      function renderAvailabilitySummary(availabilityByPastoral) {
+        const selectedRowPastorals = Array.from(
+          new Set(
+            Array.from(listEl.querySelectorAll('.pos-pastoral'))
+              .map((s) => s.value)
+              .filter(Boolean),
+          ),
+        );
+
+        // Prioriza as pastorais selecionadas nas linhas, mas também destaca outras pastorais sob gestão que tenham formulário para esta missa
+        const candidatePids = Array.from(
+          new Set([
+            ...selectedRowPastorals,
+            ...managedPastorals.map((p) => p.id).filter((pid) => availabilityByPastoral.get(pid)?.hasMatch),
+          ]),
+        );
+
+        const matchedResults = candidatePids
+          .map((pid) => ({ pastoral: pastoralMap[pid], avail: availabilityByPastoral.get(pid) }))
+          .filter((item) => item.pastoral && item.avail?.hasMatch);
+
+        const anyRowHasMatch = selectedRowPastorals.some((pid) => availabilityByPastoral.get(pid)?.hasMatch);
+        showAllWrap.classList.toggle('hidden', !anyRowHasMatch && matchedResults.length === 0);
+
+        if (matchedResults.length === 0) {
+          availabilityBanner.classList.add('hidden');
+          availabilityBanner.innerHTML = '';
+          return;
+        }
+
+        availabilityBanner.className =
+          'rounded-2xl border-2 border-emerald-300 bg-gradient-to-r from-emerald-50/90 via-[#FDFBF7] to-amber-50/70 p-3.5 text-xs space-y-2 shadow-xs';
+        availabilityBanner.innerHTML = `
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded-lg bg-emerald-700 text-white flex items-center justify-center shrink-0">
+                <i data-lucide="clipboard-check" class="w-3.5 h-3.5"></i>
+              </span>
+              <span class="font-extrabold uppercase tracking-wider text-emerald-950">Disponibilidade nos Formulários</span>
+            </div>
+            <span class="text-[11px] font-bold text-[#6D4C41]">
+              ${showUnavailableChk?.checked ? 'Exibindo todos agrupados por status' : 'Filtro ativo: exibindo apenas ✅ Disponíveis'}
+            </span>
+          </div>
+          <div class="space-y-1.5">
+            ${matchedResults
+              .map(({ pastoral, avail }) => {
+                const pLabelRaw = String(pastoral.shortName || pastoral.name).toLowerCase();
+                const pLabel = avail.available.length === 1 && pLabelRaw.endsWith('s') ? pLabelRaw.slice(0, -1) : pLabelRaw;
+                return `
+                  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 bg-white/90 rounded-xl border border-emerald-200/80 px-3 py-2">
+                    <div class="space-y-0.5 min-w-0">
+                      <p class="font-extrabold text-[#3E2723] text-xs sm:text-sm flex items-center gap-1.5 flex-wrap">
+                        <span class="inline-flex items-center gap-1 text-emerald-800">
+                          ✅ ${avail.available.length} ${escapeHtml(pLabel)} ${avail.available.length === 1 ? 'disponível' : 'disponíveis'} para esta missa (de ${avail.totalRegular})
+                        </span>
+                      </p>
+                      <p class="text-[11px] text-[#6D4C41] truncate">
+                        Formulário: <strong>${escapeHtml(avail.form.title)}</strong> • Pergunta: <em>${escapeHtml(avail.question.text)}</em>
+                      </p>
+                    </div>
+                    <div class="flex items-center gap-1.5 flex-wrap shrink-0 text-[10px] font-bold">
+                      <span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">✅ ${avail.available.length} disp.</span>
+                      <span class="px-2 py-0.5 rounded-full bg-amber-100 text-[#92400E] border border-amber-200">⏳ ${avail.noResponse.length} s/ resp.</span>
+                      <span class="px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">❌ ${avail.unavailable.length} indisp.</span>
+                    </div>
+                  </div>
+                `;
+              })
+              .join('')}
+          </div>
+        `;
+        availabilityBanner.classList.remove('hidden');
+      }
 
       function updateOEBadge() {
         if (oeSource === 'custom') {
@@ -1219,57 +1337,187 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
         return selectedByMemberId;
       }
 
-      function populateUserSelect(row, pastoralId, currentVal = '', sameCelebrationMap = new Map()) {
+      function getSiblingAvailabilityStatus(accountId, sib, availabilityByPastoral) {
+        const sibPid = sib.pastoralId || '';
+        const sibAvail = sibPid ? availabilityByPastoral.get(sibPid) : null;
+        if (!sibAvail?.hasMatch) return null;
+        const entry = sibAvail.statusByKey.get(`${accountId}::${sib.id}`);
+        return entry?.status || null;
+      }
+
+      function populateUserSelect(row, pastoralId, currentVal = '', sameCelebrationMap = new Map(), availabilityByPastoral = new Map()) {
         const userSel = row.querySelector('.pos-user');
+        const roleId = row.querySelector('.pos-role')?.value || '';
+        const isCoordRole = isCoordinatorRole(roleId, roleMap);
         const participants = dataService.getActiveParticipantsByPastoral(pastoralId);
+        const avail = availabilityByPastoral.get(pastoralId);
+        const hasFormMatch = Boolean(avail?.hasMatch);
+        const showAll = Boolean(showUnavailableChk?.checked);
 
-        const highlighted = [];
-        const regular = [];
-
-        participants.forEach((p) => {
+        const buildItemMeta = (p) => {
           const val = `${p.accountId}::${p.memberId}`;
+          const info = hasFormMatch ? avail.statusByKey.get(val) : null;
+          const status = info?.status || null;
+
           const siblingMatches = (p.siblings || [])
             .filter((sib) => sameCelebrationMap.has(sib.id))
             .map((sib) => sib.name);
 
-          if (siblingMatches.length > 0) {
-            highlighted.push({ p, val, siblingMatches });
-          } else {
-            regular.push({ p, val });
-          }
-        });
+          const availableSiblings = hasFormMatch
+            ? (p.siblings || [])
+                .filter((sib) => !sameCelebrationMap.has(sib.id))
+                .map((sib) => {
+                  const sibPid = sib.pastoralId || pastoralId;
+                  const sibStatus = getSiblingAvailabilityStatus(p.accountId, { ...sib, pastoralId: sibPid }, availabilityByPastoral);
+                  return sibStatus === 'available'
+                    ? `${sib.name}${sibPid !== pastoralId && pastoralMap[sibPid] ? ` - ${pastoralMap[sibPid].shortName}` : ''}`
+                    : null;
+                })
+                .filter(Boolean)
+            : [];
 
-        const buildOpt = ({ p, val, siblingMatches = [] }) => {
+          return { p, val, status, siblingMatches, availableSiblings };
+        };
+
+        const buildOpt = ({ p, val, status, siblingMatches = [], availableSiblings = [] }) => {
           const selected =
             val === currentVal ||
             (currentVal && !currentVal.includes('::') && p.accountId === currentVal);
-          const label =
-            siblingMatches.length > 0
-              ? `★ ${p.name} (Irmão/ã de ${siblingMatches.join(', ')} nesta missa)`
-              : `${p.name}${p.isFamily ? ' (Conta Familiar)' : ''}`;
+
+          const statusPrefix =
+            status === 'available'
+              ? '✅ '
+              : status === 'unavailable'
+                ? '❌ '
+                : status === 'no_response'
+                  ? '⏳ '
+                  : '';
+
+          const statusTag =
+            status === 'available'
+              ? ' • Disponível'
+              : status === 'unavailable'
+                ? ' • Indisponível'
+                : status === 'no_response'
+                  ? ' • Não respondeu'
+                  : '';
+
+          let extraNote = '';
+          if (siblingMatches.length > 0) {
+            extraNote = ` (★ Irmão/ã de ${siblingMatches.join(', ')} nesta missa)`;
+          } else if (availableSiblings.length > 0) {
+            extraNote = ` (Irmão/ã ${availableSiblings.join(', ')} também disponível)`;
+          } else if (p.isFamily) {
+            extraNote = ' (Conta Familiar)';
+          }
+
+          const label = `${statusPrefix}${siblingMatches.length > 0 && !statusPrefix ? '★ ' : ''}${p.name}${statusTag}${extraNote}`;
           return `<option value="${val}" ${selected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
         };
 
-        let optionsHtml = '<option value="">3. Integrante ativo...</option>';
-        if (highlighted.length > 0) {
-          optionsHtml += `<optgroup label="★ Irmãos já escalados nesta celebração">${highlighted.map(buildOpt).join('')}</optgroup>`;
-          optionsHtml += `<optgroup label="Demais integrantes da pastoral">${regular.map(buildOpt).join('')}</optgroup>`;
-        } else {
-          optionsHtml += regular.map(buildOpt).join('');
+        const allItems = participants.map(buildItemMeta);
+
+        // Sem formulário correspondente: comportamento clássico com destaque de irmãos
+        if (!hasFormMatch) {
+          const highlighted = allItems.filter((it) => it.siblingMatches.length > 0);
+          const regular = allItems.filter((it) => it.siblingMatches.length === 0);
+          let optionsHtml = '<option value="">3. Integrante ativo...</option>';
+          if (highlighted.length > 0) {
+            optionsHtml += `<optgroup label="★ Irmãos já escalados nesta celebração">${highlighted.map(buildOpt).join('')}</optgroup>`;
+            optionsHtml += `<optgroup label="Demais integrantes da pastoral">${regular.map(buildOpt).join('')}</optgroup>`;
+          } else {
+            optionsHtml += regular.map(buildOpt).join('');
+          }
+          userSel.innerHTML = optionsHtml;
+          return;
+        }
+
+        // COM formulário correspondente e checkbox DESMARCADO: filtra somente Disponíveis (com exceção segura para valor já salvo e função Coordenador)
+        if (!showAll) {
+          const availItems = allItems.filter((it) => it.status === 'available');
+          const highlighted = availItems.filter((it) => it.siblingMatches.length > 0);
+          const regularAvail = availItems.filter((it) => it.siblingMatches.length === 0);
+
+          const coordCandidates = isCoordRole
+            ? allItems.filter(
+                (it) =>
+                  it.status !== 'available' &&
+                  (it.p.account?.isGeneralAdmin ||
+                    (it.p.account?.memberships || []).some(
+                      (m) => m.pastoralId === pastoralId && m.role === 'Coordenador',
+                    )),
+              )
+            : [];
+
+          // Preserva integrante já escalado ao editar uma escala existente (mesmo que não esteja marcado como disponível)
+          const preservedCurrent = currentVal
+            ? allItems.find(
+                (it) =>
+                  (it.val === currentVal || (!currentVal.includes('::') && it.p.accountId === currentVal)) &&
+                  it.status !== 'available' &&
+                  !coordCandidates.some((c) => c.val === it.val),
+              )
+            : null;
+
+          let optionsHtml =
+            availItems.length > 0 || coordCandidates.length > 0
+              ? `<option value="">3. Integrante disponível (${availItems.length})...</option>`
+              : '<option value="">Nenhum integrante disponível no formulário (marque a opção acima para ver todos)</option>';
+
+          if (preservedCurrent) {
+            optionsHtml += `<optgroup label="Escalado atualmente (exceção)">${buildOpt(preservedCurrent)}</optgroup>`;
+          }
+          if (isCoordRole && coordCandidates.length > 0) {
+            optionsHtml += `<optgroup label="👑 Coordenadores da Pastoral">${coordCandidates.map(buildOpt).join('')}</optgroup>`;
+          }
+          if (highlighted.length > 0) {
+            optionsHtml += `<optgroup label="★ Disponíveis com irmão/ã nesta celebração">${highlighted.map(buildOpt).join('')}</optgroup>`;
+            if (regularAvail.length > 0) {
+              optionsHtml += `<optgroup label="✅ Disponíveis no formulário (${regularAvail.length})">${regularAvail.map(buildOpt).join('')}</optgroup>`;
+            }
+          } else if (availItems.length > 0) {
+            optionsHtml += `<optgroup label="✅ Disponíveis no formulário (${availItems.length})">${availItems.map(buildOpt).join('')}</optgroup>`;
+          }
+
+          userSel.innerHTML = optionsHtml;
+          return;
+        }
+
+        // COM formulário correspondente e checkbox MARCADO: todos os membros agrupados por status
+        const highlightedAll = allItems.filter((it) => it.siblingMatches.length > 0);
+        const nonHighlighted = allItems.filter((it) => it.siblingMatches.length === 0);
+        const groupAvail = nonHighlighted.filter((it) => it.status === 'available');
+        const groupNoResp = nonHighlighted.filter((it) => it.status === 'no_response');
+        const groupUnavail = nonHighlighted.filter((it) => it.status === 'unavailable');
+
+        let optionsHtml = '<option value="">3. Selecionar integrante (todos os status)...</option>';
+        if (highlightedAll.length > 0) {
+          optionsHtml += `<optgroup label="★ Irmãos já escalados nesta celebração">${highlightedAll.map(buildOpt).join('')}</optgroup>`;
+        }
+        if (groupAvail.length > 0) {
+          optionsHtml += `<optgroup label="✅ Disponíveis (${groupAvail.length})">${groupAvail.map(buildOpt).join('')}</optgroup>`;
+        }
+        if (groupNoResp.length > 0) {
+          optionsHtml += `<optgroup label="⏳ Não responderam (${groupNoResp.length})">${groupNoResp.map(buildOpt).join('')}</optgroup>`;
+        }
+        if (groupUnavail.length > 0) {
+          optionsHtml += `<optgroup label="❌ Indisponíveis (${groupUnavail.length})">${groupUnavail.map(buildOpt).join('')}</optgroup>`;
         }
         userSel.innerHTML = optionsHtml;
       }
 
       function refreshSiblingReconciliation() {
         const sameCelebrationMap = collectSameCelebrationSelected();
+        const availabilityByPastoral = computeAvailabilityByPastoral();
+        renderAvailabilitySummary(availabilityByPastoral);
 
         listEl.querySelectorAll('.position-row').forEach((row) => {
           const pastoralId = row.querySelector('.pos-pastoral').value;
           const userSel = row.querySelector('.pos-user');
           const currentVal = userSel.value;
 
-          // Atualiza destaque no dropdown preservando o valor selecionado
-          populateUserSelect(row, pastoralId, currentVal, sameCelebrationMap);
+          // Atualiza filtro de disponibilidade e destaque de irmãos preservando o valor selecionado
+          populateUserSelect(row, pastoralId, currentVal, sameCelebrationMap, availabilityByPastoral);
 
           // Atualiza a etiqueta discreta de irmãos vinculados abaixo da linha
           const hintEl = row.querySelector('.pos-sibling-hint');
@@ -1296,16 +1544,30 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
               ${siblings
                 .map((sib) => {
                   const alreadyInMass = sameCelebrationMap.has(sib.id);
+                  const sibAvailStatus = getSiblingAvailabilityStatus(accountId, sib, availabilityByPastoral);
                   const pSuffix = sib.pastoralShortName ? ` • ${escapeHtml(sib.pastoralShortName)}` : '';
                   const canQuickAdd = !alreadyInMass && sib.pastoralId && managedIds.has(sib.pastoralId);
+
+                  let pillCls = 'bg-amber-50 text-[#78350F] border-amber-300';
+                  let pillText = `Irmão(ã): ${escapeHtml(sib.name)}${pSuffix}`;
+                  if (alreadyInMass) {
+                    pillCls = 'bg-emerald-50 text-emerald-800 border-emerald-300';
+                    pillText = `✓ Irmão(ã) nesta celebração: ${escapeHtml(sib.name)}${pSuffix}`;
+                  } else if (sibAvailStatus === 'available') {
+                    pillCls = 'bg-emerald-50 text-emerald-800 border-emerald-300';
+                    pillText = `✅ Irmão(ã) disponível no formulário: ${escapeHtml(sib.name)}${pSuffix}`;
+                  } else if (sibAvailStatus === 'unavailable') {
+                    pillCls = 'bg-red-50 text-red-700 border-red-200';
+                    pillText = `❌ Irmão(ã) indisponível no formulário: ${escapeHtml(sib.name)}${pSuffix}`;
+                  } else if (sibAvailStatus === 'no_response') {
+                    pillCls = 'bg-amber-50 text-[#78350F] border-amber-300';
+                    pillText = `⏳ Irmão(ã) sem resposta no formulário: ${escapeHtml(sib.name)}${pSuffix}`;
+                  }
+
                   return `
-                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border ${
-                      alreadyInMass
-                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                        : 'bg-amber-50 text-[#78350F] border-amber-300'
-                    }">
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border ${pillCls}">
                       <i data-lucide="users" class="w-3 h-3"></i>
-                      ${alreadyInMass ? '✓ Irmão(ã) nesta celebração:' : 'Irmão(ã):'} ${escapeHtml(sib.name)}${pSuffix}
+                      ${pillText}
                     </span>
                     ${
                       canQuickAdd
@@ -1343,7 +1605,7 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
           <option value="">2. Função ativa...</option>
           ${activeRoles.map((r) => `<option value="${r.id}" ${presetRoleId === r.id ? 'selected' : ''}>${escapeHtml(r.name)}</option>`).join('')}
         `;
-        populateUserSelect(row, pastoralId, targetKey, collectSameCelebrationSelected());
+        populateUserSelect(row, pastoralId, targetKey, collectSameCelebrationSelected(), computeAvailabilityByPastoral());
       }
 
       function addPositionRow(preset = null) {
@@ -1391,6 +1653,9 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
           updateConflictWarnings();
           refreshSiblingReconciliation();
         });
+        row.querySelector('.pos-role').addEventListener('change', () => {
+          refreshSiblingReconciliation();
+        });
         row.querySelector('.pos-user').addEventListener('change', () => {
           updateConflictWarnings();
           refreshSiblingReconciliation();
@@ -1419,6 +1684,12 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
       });
       timeInput.addEventListener('change', () => {
         updateConflictWarnings();
+        refreshSiblingReconciliation();
+      });
+      locationSelect?.addEventListener('change', () => {
+        refreshSiblingReconciliation();
+      });
+      showUnavailableChk?.addEventListener('change', () => {
         refreshSiblingReconciliation();
       });
       bodyEl.querySelector('#btn-add-position-row').addEventListener('click', () => addPositionRow());

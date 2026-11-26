@@ -656,6 +656,7 @@ export const dataService = {
       type: q.type,
       required: Boolean(q.required),
       options: q.options || [],
+      ...(q.massMeta ? { massMeta: q.massMeta } : {}),
     }));
     const pastoralIds = Array.isArray(form.pastoralIds) && form.pastoralIds.length > 0 ? form.pastoralIds : ['all'];
     const payload = {

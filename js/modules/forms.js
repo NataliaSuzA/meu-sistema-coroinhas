@@ -7,6 +7,11 @@
 
 import { dataService } from '../services/dataService.js';
 import {
+  DEFAULT_WEEKEND_OPTIONS,
+  formatSingleMassQuestionText,
+  formatWeekendQuestionText,
+} from '../services/availabilityService.js';
+import {
   canManageAnyOfPastorals,
   closeModal,
   escapeHtml,
@@ -498,8 +503,18 @@ function openAnswerFormModal(form, user, { readOnly = false, initialRespondentId
   });
 }
 
+function addDaysToIso(isoDate, days) {
+  if (!isoDate || !/^\d{4}-\d{2}-\d{2}/.test(isoDate)) return '';
+  const [y, m, d] = isoDate.slice(0, 10).split('-').map(Number);
+  const dt = new Date(y, m - 1, d + days);
+  if (Number.isNaN(dt.getTime())) return '';
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+}
+
 function openFormBuilderModal(existing, user, onSaved) {
   const pastorals = dataService.getActivePastorals();
+  const activeLocations = dataService.getActiveLocations();
+  const locationMap = Object.fromEntries(activeLocations.map((l) => [l.id, l]));
   const managedIds = new Set(getCoordinatedPastoralIds(user, pastorals));
   const managedPastorals = pastorals.filter((p) => managedIds.has(p.id));
   const generalAdmin = isGeneralAdmin(user);
@@ -569,14 +584,29 @@ function openFormBuilderModal(existing, user, onSaved) {
         </div>
 
         <div class="pt-3 border-t border-[#E6DACE]/80">
-          <div class="flex items-center justify-between mb-2.5">
+          <div class="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
             <label class="text-xs font-bold uppercase tracking-wider text-[#3E2723]">Perguntas</label>
-            <button id="btn-add-question" type="button"
-              class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 text-[#92400E] border border-amber-300 transition">
-              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
-              Adicionar Pergunta
-            </button>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <button id="btn-add-mass-question" type="button"
+                class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 transition">
+                <i data-lucide="calendar-plus" class="w-3.5 h-3.5 text-emerald-700"></i>
+                + Missa (Data/Horário/Local)
+              </button>
+              <button id="btn-add-weekend-question" type="button"
+                class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-amber-50 hover:bg-amber-100 text-[#92400E] border border-amber-300 transition">
+                <i data-lucide="calendar-range" class="w-3.5 h-3.5 text-[#B45309]"></i>
+                + Final de Semana
+              </button>
+              <button id="btn-add-question" type="button"
+                class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-white hover:bg-[#FAF6F0] text-[#5D4037] border border-[#D7C4B2] transition">
+                <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                Pergunta Livre
+              </button>
+            </div>
           </div>
+          <p class="text-[11px] text-[#6D4C41] mb-2.5">
+            Perguntas vinculadas a <strong>Data, Horário e Local</strong> (ou nos padrões <code>DD/MM (Dia) HH:MM - Local</code> e <code>Final de Semana dia DD e DD/MM</code>) cruzam automaticamente com a montagem de <strong>Escalas</strong>.
+          </p>
           <div id="questions-builder-list" class="space-y-3"></div>
         </div>
 
@@ -607,11 +637,71 @@ function openFormBuilderModal(existing, user, onSaved) {
         row.className = 'q-row p-3.5 rounded-xl bg-[#FAF6F0] border border-[#E6DACE] space-y-2.5';
         row.dataset.qid = preset?.id || '';
         const qType = preset?.type || 'text';
+        const meta = preset?.massMeta || null;
+        const metaMode = meta?.mode || '';
+
         row.innerHTML = `
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <select class="q-mass-mode px-2.5 py-1.5 rounded-lg border border-[#D7C4B2] bg-white text-[11px] font-bold text-[#4E342E] outline-none focus:border-[#B45309]">
+              <option value="" ${metaMode === '' ? 'selected' : ''}>Pergunta comum (sem vínculo estruturado)</option>
+              <option value="single" ${metaMode === 'single' ? 'selected' : ''}>📅 Disponibilidade de Missa Única (cruzamento automático)</option>
+              <option value="weekend" ${metaMode === 'weekend' ? 'selected' : ''}>📅 Disponibilidade de Final de Semana (cruzamento automático)</option>
+            </select>
+            <button type="button" class="remove-q-btn p-1.5 rounded-lg text-[#8D6E63] hover:text-red-700 hover:bg-red-50" title="Remover pergunta">
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+            </button>
+          </div>
+
+          <!-- Campos estruturados para Missa Única -->
+          <div class="q-mass-single-fields ${metaMode === 'single' ? '' : 'hidden'} p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200 grid grid-cols-1 sm:grid-cols-12 gap-2">
+            <div class="sm:col-span-3">
+              <label class="block text-[10px] font-bold uppercase text-emerald-900 mb-0.5">Data</label>
+              <input type="date" class="q-mass-date w-full px-2 py-1.5 rounded-lg border border-emerald-300 bg-white text-xs outline-none focus:border-[#B45309]"
+                value="${escapeHtml(meta?.mode === 'single' ? meta.date || '' : '')}">
+            </div>
+            <div class="sm:col-span-2">
+              <label class="block text-[10px] font-bold uppercase text-emerald-900 mb-0.5">Horário</label>
+              <input type="time" class="q-mass-time w-full px-2 py-1.5 rounded-lg border border-emerald-300 bg-white text-xs outline-none focus:border-[#B45309]"
+                value="${escapeHtml(meta?.mode === 'single' ? meta.time || '19:00' : '19:00')}">
+            </div>
+            <div class="sm:col-span-4">
+              <label class="block text-[10px] font-bold uppercase text-emerald-900 mb-0.5">Local</label>
+              <select class="q-mass-location w-full px-2 py-1.5 rounded-lg border border-emerald-300 bg-white text-xs outline-none focus:border-[#B45309]">
+                <option value="">Qualquer / Sem local fixo</option>
+                ${activeLocations
+                  .map(
+                    (loc) =>
+                      `<option value="${loc.id}" ${meta?.locationId === loc.id || (!meta?.locationId && meta?.locationName === loc.name) ? 'selected' : ''}>${escapeHtml(loc.name)}</option>`,
+                  )
+                  .join('')}
+              </select>
+            </div>
+            <div class="sm:col-span-3">
+              <label class="block text-[10px] font-bold uppercase text-emerald-900 mb-0.5">Celebração (opcional)</label>
+              <input type="text" class="q-mass-label w-full px-2 py-1.5 rounded-lg border border-emerald-300 bg-white text-xs outline-none focus:border-[#B45309]"
+                placeholder="Ex: Missa do Sagrado"
+                value="${escapeHtml(meta?.celebrationLabel || '')}">
+            </div>
+          </div>
+
+          <!-- Campos estruturados para Final de Semana -->
+          <div class="q-mass-weekend-fields ${metaMode === 'weekend' ? '' : 'hidden'} p-2.5 rounded-xl bg-amber-50/80 border border-amber-300 grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div>
+              <label class="block text-[10px] font-bold uppercase text-[#78350F] mb-0.5">Data do Sábado</label>
+              <input type="date" class="q-mass-date-start w-full px-2.5 py-1.5 rounded-lg border border-amber-300 bg-white text-xs outline-none focus:border-[#B45309]"
+                value="${escapeHtml(meta?.mode === 'weekend' ? meta.date || '' : '')}">
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold uppercase text-[#78350F] mb-0.5">Data do Domingo</label>
+              <input type="date" class="q-mass-date-end w-full px-2.5 py-1.5 rounded-lg border border-amber-300 bg-white text-xs outline-none focus:border-[#B45309]"
+                value="${escapeHtml(meta?.mode === 'weekend' ? meta.endDate || '' : '')}">
+            </div>
+          </div>
+
           <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
-            <div class="sm:col-span-7">
+            <div class="sm:col-span-8">
               <input type="text" class="q-text w-full px-3 py-2 rounded-lg border border-[#E6DACE] bg-white text-xs font-medium outline-none focus:border-[#B45309]"
-                placeholder="Digite a pergunta..." value="${escapeHtml(preset?.text || '')}" required>
+                placeholder="Digite a pergunta (ex: 02/12 (Qua) 19:30 - São Francisco)..." value="${escapeHtml(preset?.text || '')}" required>
             </div>
             <div class="sm:col-span-4">
               <select class="q-type w-full px-2.5 py-2 rounded-lg border border-[#E6DACE] bg-white text-xs font-medium outline-none focus:border-[#B45309]">
@@ -621,15 +711,10 @@ function openFormBuilderModal(existing, user, onSaved) {
                 <option value="boolean" ${qType === 'boolean' ? 'selected' : ''}>Sim / Não</option>
               </select>
             </div>
-            <div class="sm:col-span-1 flex justify-end">
-              <button type="button" class="remove-q-btn p-1.5 rounded-lg text-[#8D6E63] hover:text-red-700 hover:bg-red-50">
-                <i data-lucide="trash-2" class="w-4 h-4"></i>
-              </button>
-            </div>
           </div>
           <div class="q-options-wrap ${qType === 'choice' || qType === 'checkbox' ? '' : 'hidden'}">
             <input type="text" class="q-options w-full px-3 py-1.5 rounded-lg border border-[#E6DACE] bg-white text-xs outline-none focus:border-[#B45309]"
-              placeholder="Opções separadas por vírgula (ex: Manhã, Tarde, Noite)"
+              placeholder="Opções separadas por vírgula (ex: Disponível, Indisponível)"
               value="${escapeHtml((preset?.options || []).join(', '))}">
           </div>
           <label class="inline-flex items-center gap-1.5 text-xs text-[#5D4037] cursor-pointer">
@@ -638,11 +723,76 @@ function openFormBuilderModal(existing, user, onSaved) {
           </label>
         `;
 
+        const modeSel = row.querySelector('.q-mass-mode');
+        const singleFields = row.querySelector('.q-mass-single-fields');
+        const weekendFields = row.querySelector('.q-mass-weekend-fields');
         const typeSel = row.querySelector('.q-type');
         const optsWrap = row.querySelector('.q-options-wrap');
-        typeSel.addEventListener('change', () => {
+        const optsInput = row.querySelector('.q-options');
+        const textInput = row.querySelector('.q-text');
+        const singleDateEl = row.querySelector('.q-mass-date');
+        const singleTimeEl = row.querySelector('.q-mass-time');
+        const singleLocEl = row.querySelector('.q-mass-location');
+        const singleLabelEl = row.querySelector('.q-mass-label');
+        const wkStartEl = row.querySelector('.q-mass-date-start');
+        const wkEndEl = row.querySelector('.q-mass-date-end');
+
+        const syncOptionsVisibility = () => {
           optsWrap.classList.toggle('hidden', typeSel.value !== 'choice' && typeSel.value !== 'checkbox');
+        };
+
+        const syncSingleQuestionText = () => {
+          const locName = locationMap[singleLocEl.value]?.name || '';
+          const generated = formatSingleMassQuestionText({
+            date: singleDateEl.value,
+            time: singleTimeEl.value,
+            locationName: locName,
+            celebrationLabel: singleLabelEl.value,
+          });
+          if (generated) textInput.value = generated;
+        };
+
+        const syncWeekendQuestionText = () => {
+          const generated = formatWeekendQuestionText({
+            date: wkStartEl.value,
+            endDate: wkEndEl.value,
+          });
+          if (generated) textInput.value = generated;
+        };
+
+        modeSel.addEventListener('change', () => {
+          const mode = modeSel.value;
+          singleFields.classList.toggle('hidden', mode !== 'single');
+          weekendFields.classList.toggle('hidden', mode !== 'weekend');
+          if (mode === 'single') {
+            typeSel.value = 'choice';
+            if (!optsInput.value.trim()) optsInput.value = 'Disponível, Indisponível';
+            syncOptionsVisibility();
+            syncSingleQuestionText();
+          } else if (mode === 'weekend') {
+            typeSel.value = 'checkbox';
+            if (!optsInput.value.trim() || optsInput.value.trim() === 'Disponível, Indisponível') {
+              optsInput.value = DEFAULT_WEEKEND_OPTIONS.join(', ');
+            }
+            syncOptionsVisibility();
+            syncWeekendQuestionText();
+          }
         });
+
+        [singleDateEl, singleTimeEl, singleLocEl, singleLabelEl].forEach((el) => {
+          el.addEventListener('change', syncSingleQuestionText);
+          if (el === singleLabelEl) el.addEventListener('input', syncSingleQuestionText);
+        });
+
+        wkStartEl.addEventListener('change', () => {
+          if (wkStartEl.value) {
+            wkEndEl.value = addDaysToIso(wkStartEl.value, 1);
+          }
+          syncWeekendQuestionText();
+        });
+        wkEndEl.addEventListener('change', syncWeekendQuestionText);
+
+        typeSel.addEventListener('change', syncOptionsVisibility);
         row.querySelector('.remove-q-btn').addEventListener('click', () => row.remove());
 
         qList.appendChild(row);
@@ -656,6 +806,34 @@ function openFormBuilderModal(existing, user, onSaved) {
       }
 
       bodyEl.querySelector('#btn-add-question').addEventListener('click', () => addQuestionRow());
+      bodyEl.querySelector('#btn-add-mass-question').addEventListener('click', () => {
+        const defaultLoc = activeLocations.find((l) => l.name.toLowerCase().includes('matriz')) || activeLocations[0];
+        addQuestionRow({
+          type: 'choice',
+          options: ['Disponível', 'Indisponível'],
+          required: true,
+          massMeta: {
+            mode: 'single',
+            date: '',
+            time: '19:00',
+            locationId: defaultLoc?.id || '',
+            locationName: defaultLoc?.name || '',
+            celebrationLabel: '',
+          },
+        });
+      });
+      bodyEl.querySelector('#btn-add-weekend-question').addEventListener('click', () => {
+        addQuestionRow({
+          type: 'checkbox',
+          options: DEFAULT_WEEKEND_OPTIONS,
+          required: true,
+          massMeta: {
+            mode: 'weekend',
+            date: '',
+            endDate: '',
+          },
+        });
+      });
       bodyEl.querySelector('#cancel-builder-btn').addEventListener('click', closeModal);
 
       bodyEl.querySelector('#builder-form').addEventListener('submit', (e) => {
@@ -680,8 +858,46 @@ function openFormBuilderModal(existing, user, onSaved) {
                   .map((s) => s.trim())
                   .filter(Boolean)
               : [];
+
+          const mode = row.querySelector('.q-mass-mode')?.value || '';
+          let massMeta = null;
+          if (mode === 'single') {
+            const mDate = row.querySelector('.q-mass-date')?.value || '';
+            const mTime = row.querySelector('.q-mass-time')?.value || '';
+            const mLocId = row.querySelector('.q-mass-location')?.value || '';
+            const mLocName = locationMap[mLocId]?.name || '';
+            const mLabel = row.querySelector('.q-mass-label')?.value.trim() || '';
+            if (mDate) {
+              massMeta = {
+                mode: 'single',
+                date: mDate,
+                time: mTime,
+                locationId: mLocId,
+                locationName: mLocName,
+                celebrationLabel: mLabel,
+              };
+            }
+          } else if (mode === 'weekend') {
+            const mDate = row.querySelector('.q-mass-date-start')?.value || '';
+            const mEnd = row.querySelector('.q-mass-date-end')?.value || '';
+            if (mDate) {
+              massMeta = {
+                mode: 'weekend',
+                date: mDate,
+                endDate: mEnd || addDaysToIso(mDate, 1),
+              };
+            }
+          }
+
           if (text) {
-            questions.push({ id: row.dataset.qid || undefined, text, type, required, options });
+            questions.push({
+              id: row.dataset.qid || undefined,
+              text,
+              type,
+              required,
+              options,
+              ...(massMeta ? { massMeta } : {}),
+            });
           }
         });
 
