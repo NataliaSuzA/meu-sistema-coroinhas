@@ -21,6 +21,7 @@ import {
   getCountdownBadge,
   getFirstName,
   getMemberPastoralIds,
+  getNoticeDashboardStatus,
   getOpenSubstitutionsForUser,
   getTodayISO,
   getUserMemberships,
@@ -188,14 +189,19 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
     `
       : '';
 
-  // Aviso fixado estritamente filtrado pelas pastorais do usuário
+  // Avisos ativos no Dashboard (fixados dentro do prazo ou sem prazo + avisos com exibirDashboardAte válido >= hoje)
   const visibleNotices = notices.filter((n) => {
     if (!isPastoralScopedItemVisible(n.pastoralIds, user, pastorals)) return false;
     if (dashboardPastoralFilter === 'all') return true;
     const pids = n.pastoralIds || ['all'];
     return pids.includes('all') || pids.includes(dashboardPastoralFilter);
   });
-  const pinnedNotice = visibleNotices.find((n) => n.pinned) || null;
+  const dashboardNotices = visibleNotices
+    .filter((n) => getNoticeDashboardStatus(n, todayISO).active)
+    .sort((a, b) => {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+      return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+    });
 
   // Próximas 3 datas do usuário (ou de todos os irmãos em Contas Familiares)
   const myUpcomingAssignments = [];
@@ -356,35 +362,44 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
         </div>
       </div>
 
-      <!-- Aviso Fixado (Isolado por Pastoral) -->
+      <!-- Mural de Avisos Ativos no Início (Isolado por Pastoral e Filtrado por Validade) -->
       ${
-        pinnedNotice
+        dashboardNotices.length > 0
           ? `
-        <section class="relative overflow-hidden rounded-2xl bg-gradient-to-r from-amber-50 via-[#FDFBF7] to-white border-2 border-amber-400/80 p-5 shadow-xs">
-          <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-            <div class="flex items-start gap-3.5">
-              <div class="w-10 h-10 rounded-xl bg-[#B45309] text-white flex items-center justify-center shrink-0 shadow-sm">
-                <i data-lucide="pin" class="w-5 h-5"></i>
-              </div>
-              <div>
-                <div class="flex items-center gap-1.5 flex-wrap mb-1">
-                  <span class="text-[11px] font-extrabold uppercase tracking-wider text-amber-900 bg-amber-200/80 px-2 py-0.5 rounded-full">
-                    Aviso Fixado
-                  </span>
-                  ${renderPastoralPillsList(pinnedNotice.pastoralIds, pastoralMap, { compact: true })}
-                  <span class="text-xs text-[#6D4C41]">${escapeHtml(formatDateTimeBR(pinnedNotice.createdAt))}</span>
-                </div>
-                <h4 class="text-base font-bold text-[#3E2723]">${escapeHtml(pinnedNotice.title)}</h4>
-                <p class="text-sm text-[#4E342E] mt-1 leading-relaxed">${escapeHtml(pinnedNotice.content)}</p>
-                <p class="text-xs text-[#8D6E63] mt-2 font-medium">Publicado por ${escapeHtml(userMap[pinnedNotice.authorId]?.name || 'Coordenação')}</p>
-              </div>
-            </div>
-            <button type="button" data-nav="notices"
-              class="shrink-0 self-start text-xs font-bold text-[#92400E] hover:text-[#3E2723] bg-white hover:bg-amber-50 border border-amber-300 px-3 py-1.5 rounded-lg transition">
-              Ver avisos
-            </button>
-          </div>
-        </section>
+        <div class="space-y-3" id="dashboard-notices-mural">
+          ${dashboardNotices
+            .map((notice) => {
+              const dashStatus = getNoticeDashboardStatus(notice, todayISO);
+              return `
+                <section class="relative overflow-hidden rounded-2xl bg-gradient-to-r from-amber-50 via-[#FDFBF7] to-white border-2 border-amber-400/80 p-5 shadow-xs">
+                  <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                    <div class="flex items-start gap-3.5">
+                      <div class="w-10 h-10 rounded-xl bg-[#B45309] text-white flex items-center justify-center shrink-0 shadow-sm">
+                        <i data-lucide="pin" class="w-5 h-5"></i>
+                      </div>
+                      <div>
+                        <div class="flex items-center gap-1.5 flex-wrap mb-1">
+                          <span class="text-[11px] font-extrabold text-amber-900 bg-amber-200/80 px-2.5 py-0.5 rounded-full">
+                            ${escapeHtml(dashStatus.label || '📌 Aviso Fixado')}
+                          </span>
+                          ${renderPastoralPillsList(notice.pastoralIds, pastoralMap, { compact: true })}
+                          <span class="text-xs text-[#6D4C41]">${escapeHtml(formatDateTimeBR(notice.createdAt))}</span>
+                        </div>
+                        <h4 class="text-base font-bold text-[#3E2723]">${escapeHtml(notice.title)}</h4>
+                        <p class="text-sm text-[#4E342E] mt-1 leading-relaxed whitespace-pre-line">${escapeHtml(notice.content)}</p>
+                        <p class="text-xs text-[#8D6E63] mt-2 font-medium">Publicado por ${escapeHtml(userMap[notice.authorId]?.name || 'Coordenação')}</p>
+                      </div>
+                    </div>
+                    <button type="button" data-nav="notices"
+                      class="shrink-0 self-start text-xs font-bold text-[#92400E] hover:text-[#3E2723] bg-white hover:bg-amber-50 border border-amber-300 px-3 py-1.5 rounded-lg transition">
+                      Ver avisos
+                    </button>
+                  </div>
+                </section>
+              `;
+            })
+            .join('')}
+        </div>
       `
           : ''
       }

@@ -829,11 +829,15 @@ export const dataService = {
       });
     }
 
+    const rawUntil = String(notice.exibirDashboardAte || '').trim();
+    const exibirDashboardAte = /^\d{4}-\d{2}-\d{2}$/.test(rawUntil) ? rawUntil : null;
+
     const payload = {
       ...(existing || {}),
       ...notice,
       id: notice.id || genId('not'),
       pastoralIds,
+      exibirDashboardAte,
       createdAt: existing?.createdAt || new Date().toISOString(),
     };
     ops.push({ type: 'set', collection: COLLECTIONS.NOTICES, data: payload });

@@ -8,12 +8,15 @@
 
 import { dataService } from '../services/dataService.js';
 import {
+  addDaysToTodayISO,
   canManageAnyOfPastorals,
   closeModal,
   escapeHtml,
   formatDateTimeBR,
   getCoordinatedPastoralIds,
   getMemberPastoralIds,
+  getNoticeDashboardStatus,
+  getTodayISO,
   hasPermission,
   isGeneralAdmin,
   isPastoralScopedItemVisible,
@@ -39,6 +42,8 @@ export function renderNotices(container, { user, permissions }) {
     noticePastoralFilter = 'all';
   }
 
+  const todayISO = getTodayISO();
+
   const visibleNotices = dataService
     .getNotices()
     .filter((n) => isPastoralScopedItemVisible(n.pastoralIds, user, pastorals))
@@ -48,6 +53,9 @@ export function renderNotices(container, { user, permissions }) {
       return pids.includes('all') || pids.includes(noticePastoralFilter);
     })
     .sort((a, b) => {
+      const aActive = getNoticeDashboardStatus(a, todayISO).active;
+      const bActive = getNoticeDashboardStatus(b, todayISO).active;
+      if (aActive !== bActive) return aActive ? -1 : 1;
       if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
       return String(b.createdAt).localeCompare(String(a.createdAt));
     });
@@ -108,9 +116,10 @@ export function renderNotices(container, { user, permissions }) {
             .map((not) => {
               const author = userMap[not.authorId]?.name || 'Coordenação';
               const canManage = canPublish && (generalAdmin || canManageAnyOfPastorals(user, not.pastoralIds));
+              const dashStatus = getNoticeDashboardStatus(not, todayISO);
               return `
                 <article class="rounded-2xl border-2 ${
-                  not.pinned
+                  dashStatus.active
                     ? 'border-amber-400 bg-gradient-to-r from-amber-50/75 via-[#FDFBF7] to-white shadow-sm'
                     : 'border-[#E6DACE] bg-white'
                 } p-5 transition">
@@ -118,12 +127,15 @@ export function renderNotices(container, { user, permissions }) {
                     <div class="space-y-1.5 flex-1">
                       <div class="flex items-center gap-1.5 flex-wrap">
                         ${
-                          not.pinned
-                            ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-[#D97706] text-white">
-                                <i data-lucide="pin" class="w-3 h-3"></i>
-                                Fixado no Início
+                          dashStatus.active
+                            ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-amber-100 text-[#78350F] border border-amber-300">
+                                ${escapeHtml(dashStatus.label)}
                               </span>`
-                            : ''
+                            : dashStatus.expired
+                              ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-stone-100 text-stone-600 border border-stone-200">
+                                  ${escapeHtml(dashStatus.label)}
+                                </span>`
+                              : ''
                         }
                         ${renderPastoralPillsList(not.pastoralIds, pastoralMap, { compact: true })}
                         <span class="text-xs text-[#8D6E63] font-medium">${escapeHtml(formatDateTimeBR(not.createdAt))}</span>
@@ -256,19 +268,55 @@ function openNoticeModal(existing, user, onSaved) {
           <textarea name="content" rows="4" required placeholder="Escreva o comunicado..."
             class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">${escapeHtml(existing?.content || '')}</textarea>
         </div>
-        <label class="inline-flex items-center gap-2 text-sm font-medium text-[#3E2723] cursor-pointer">
-          <input name="pinned" type="checkbox" ${existing?.pinned ? 'checked' : ''} class="rounded text-[#B45309]">
-          Fixar este aviso em destaque no Início (Dashboard)
-        </label>
+        <div class="p-3.5 rounded-xl bg-[#FAF6F0] border border-[#E6DACE] space-y-3">
+          <label class="inline-flex items-center gap-2 text-sm font-medium text-[#3E2723] cursor-pointer">
+            <input id="notice-pinned-chk" name="pinned" type="checkbox" ${existing?.pinned ? 'checked' : ''} class="rounded text-[#B45309]">
+            Fixar este aviso em destaque no Início (Dashboard)
+          </label>
+
+          <div class="pt-2 border-t border-[#E6DACE]/80 space-y-2">
+            <label for="notice-exibir-ate" class="block text-xs font-bold uppercase tracking-wider text-[#5D4037]">
+              Exibir no Início até (opcional)
+            </label>
+            <div class="flex flex-col sm:flex-row sm:items-center gap-2">
+              <input id="notice-exibir-ate" name="exibirDashboardAte" type="date"
+                value="${escapeHtml(existing?.exibirDashboardAte || '')}"
+                class="px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm font-medium text-[#3E2723] focus:border-[#B45309] outline-none">
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <button type="button" data-dash-date-preset="0"
+                  class="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-white hover:bg-amber-50 text-[#5D4037] border border-[#D7C4B2] hover:border-[#B45309] transition">
+                  Hoje
+                </button>
+                <button type="button" data-dash-date-preset="3"
+                  class="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-white hover:bg-amber-50 text-[#5D4037] border border-[#D7C4B2] hover:border-[#B45309] transition">
+                  +3 dias
+                </button>
+                <button type="button" data-dash-date-preset="7"
+                  class="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-white hover:bg-amber-50 text-[#5D4037] border border-[#D7C4B2] hover:border-[#B45309] transition">
+                  +7 dias
+                </button>
+                <button type="button" data-dash-date-preset="clear"
+                  class="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-200 transition">
+                  Limpar / Sem prazo
+                </button>
+              </div>
+            </div>
+            <p class="text-[11px] text-[#6D4C41]">
+              Enquanto a data for válida (hoje ou futura), o aviso aparece no Início mesmo sem marcar "Fixar". Após vencer, ele sai do Início automaticamente e permanece no histórico da aba Avisos.
+            </p>
+          </div>
+        </div>
+
         <div class="flex justify-end gap-2 pt-2">
           <button type="button" id="cancel-notice-btn" class="px-4 py-2 rounded-xl border border-[#E6DACE] text-sm font-semibold text-[#5D4037] hover:bg-[#FAF6F0]">Cancelar</button>
-          <button type="submit" class="px-5 py-2 rounded-xl bg-[#3E2723] hover:bg-[#5D4037] text-white text-sm font-semibold transition">Publicar Aviso</button>
+          <button type="submit" class="px-5 py-2 rounded-xl bg-[#3E2723] hover:bg-[#5D4037] text-white text-sm font-semibold transition">${existing ? 'Salvar Alterações' : 'Publicar Aviso'}</button>
         </div>
       </form>
     `,
     onMount(bodyEl) {
       const allChk = bodyEl.querySelector('#notice-target-all');
       const pidChks = bodyEl.querySelectorAll('.notice-target-pid');
+      const untilInput = bodyEl.querySelector('#notice-exibir-ate');
       if (allChk) {
         allChk.addEventListener('change', () => {
           if (allChk.checked) pidChks.forEach((c) => { c.checked = false; });
@@ -280,6 +328,17 @@ function openNoticeModal(existing, user, onSaved) {
         });
       }
 
+      bodyEl.querySelectorAll('[data-dash-date-preset]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const preset = btn.dataset.dashDatePreset;
+          if (preset === 'clear') {
+            untilInput.value = '';
+          } else {
+            untilInput.value = addDaysToTodayISO(Number(preset));
+          }
+        });
+      });
+
       bodyEl.querySelector('#cancel-notice-btn').addEventListener('click', closeModal);
       bodyEl.querySelector('#notice-form').addEventListener('submit', (e) => {
         e.preventDefault();
@@ -289,6 +348,7 @@ function openNoticeModal(existing, user, onSaved) {
           showToast('Selecione obrigatoriamente pelo menos uma pastoral de destino.', 'error');
           return;
         }
+        const rawUntil = String(fd.get('exibirDashboardAte') || '').trim();
         dataService.saveNotice({
           id: existing?.id,
           pastoralIds,
@@ -296,6 +356,7 @@ function openNoticeModal(existing, user, onSaved) {
           content: String(fd.get('content')).trim(),
           authorId: existing?.authorId || user.id,
           pinned: fd.get('pinned') === 'on',
+          exibirDashboardAte: /^\d{4}-\d{2}-\d{2}$/.test(rawUntil) ? rawUntil : null,
         });
         closeModal();
         showToast(existing ? 'Aviso atualizado!' : 'Aviso publicado com sucesso!');

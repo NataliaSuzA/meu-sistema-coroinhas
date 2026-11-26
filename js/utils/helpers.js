@@ -322,6 +322,55 @@ export function getTodayISO() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+export function addDaysToTodayISO(days = 0) {
+  const d = new Date();
+  d.setDate(d.getDate() + Number(days || 0));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Avalia se um aviso deve aparecer no Início (Dashboard) na data atual
+ * e retorna a etiqueta visual padronizada para a tela de Avisos e Dashboard.
+ */
+export function getNoticeDashboardStatus(notice, todayISO = getTodayISO()) {
+  const rawUntil = String(notice?.exibirDashboardAte || '').trim();
+  const until = /^\d{4}-\d{2}-\d{2}$/.test(rawUntil) ? rawUntil : null;
+  const pinned = Boolean(notice?.pinned);
+
+  if (until) {
+    if (todayISO <= until) {
+      return {
+        active: true,
+        expired: false,
+        until,
+        label: `📌 No Dashboard até ${formatDateBR(until)}`,
+      };
+    }
+    return {
+      active: false,
+      expired: true,
+      until,
+      label: `⏳ Encerrado no Dashboard em ${formatDateBR(until)}`,
+    };
+  }
+
+  if (pinned) {
+    return {
+      active: true,
+      expired: false,
+      until: null,
+      label: '📌 Fixado no Dashboard',
+    };
+  }
+
+  return {
+    active: false,
+    expired: false,
+    until: null,
+    label: '',
+  };
+}
+
 export function formatDateBR(isoDate) {
   if (!isoDate) return '—';
   const [y, m, d] = isoDate.slice(0, 10).split('-');
