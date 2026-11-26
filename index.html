@@ -233,55 +233,58 @@
 
     <!-- Coluna Principal -->
     <div class="flex-1 flex flex-col min-w-0 lg:pl-72">
-      <!-- Cabeçalho Superior -->
-      <header class="sticky top-0 z-30 bg-[#FDFBF7]/95 backdrop-blur-md border-b border-[#E6DACE] shadow-[0_1px_3px_rgba(62,39,35,0.04)]">
-        <div class="px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-3">
-          <!-- Esquerda: Hambúrguer + Título da Página -->
-          <div class="flex items-center gap-3 min-w-0">
-            <button id="open-sidebar-btn" type="button" class="lg:hidden p-2 rounded-xl text-[#4E342E] hover:bg-[#F5EFE6] border border-[#E6DACE]" aria-label="Abrir menu">
-              <i data-lucide="menu" class="w-5 h-5"></i>
+      <!-- Cabeçalho Superior (com suporte à safe-area do iPhone / Safari PWA) -->
+      <header class="topbar sticky top-0 z-30 bg-[#FDFBF7]/95 backdrop-blur-md border-b border-[#E6DACE] shadow-[0_1px_3px_rgba(62,39,35,0.04)]">
+        <div class="px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+          <!-- Esquerda: Botão Menu Mobile (sempre visível < 1024px) + Título da Página -->
+          <div class="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
+            <button id="mobile-menu-btn" type="button"
+              class="lg:hidden inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#3E2723] hover:bg-[#5D4037] text-amber-300 border border-[#2B1B18] text-xs font-extrabold shadow-xs shrink-0 min-h-[40px] active:scale-95 transition"
+              aria-label="Abrir menu de navegação">
+              <i data-lucide="menu" class="w-4 h-4"></i>
+              <span>Menu</span>
             </button>
             <div class="min-w-0">
-              <h2 id="page-title" class="text-lg sm:text-xl font-bold text-[#3E2723] truncate">Início</h2>
+              <h2 id="page-title" class="text-base sm:text-xl font-bold text-[#3E2723] truncate">Início</h2>
               <p id="page-subtitle" class="text-xs text-[#6D4C41] hidden sm:block truncate">Visão Geral das Pastorais</p>
             </div>
           </div>
 
-          <!-- Direita: Seletor Rápido de Perfil + Usuário Logado + Sair -->
-          <div class="flex items-center gap-2 sm:gap-3 flex-wrap justify-end">
+          <!-- Direita: Sino + Usuário Logado + Sair (+ Seletor Rápido restrito a Coordenação Geral / localhost) -->
+          <div class="flex items-center gap-1.5 sm:gap-2.5 flex-wrap justify-end shrink-0">
             <!-- Seletor Rápido de Perfil (visível apenas para Coordenação Geral ou localhost) -->
-            <div id="quick-profile-switcher-box" class="hidden items-center gap-1.5 bg-amber-50 border border-amber-300/80 rounded-xl px-2.5 py-1.5">
+            <div id="quick-profile-switcher-box" class="hidden items-center gap-1.5 bg-amber-50 border border-amber-300/80 rounded-xl px-2 sm:px-2.5 py-1.5 order-last sm:order-first w-full sm:w-auto">
               <i data-lucide="repeat-2" class="w-3.5 h-3.5 text-[#B45309] shrink-0"></i>
               <label for="quick-profile-switcher" class="text-[11px] font-semibold text-[#92400E] hidden md:inline whitespace-nowrap">Alternar perfil:</label>
               <select id="quick-profile-switcher" aria-label="Alternar perfil rapidamente"
-                class="bg-transparent text-xs font-bold text-[#3E2723] outline-none cursor-pointer pr-1 max-w-[185px] sm:max-w-[260px]">
+                class="bg-transparent text-xs font-bold text-[#3E2723] outline-none cursor-pointer pr-1 flex-1 sm:flex-none max-w-full sm:max-w-[240px]">
                 <!-- Preenchido via JS -->
               </select>
             </div>
 
             <!-- Sino de Notificações Internas -->
-            <div class="relative">
+            <div class="relative shrink-0">
               <button id="notifications-bell-btn" type="button" title="Central de Notificações"
-                class="relative p-2 rounded-xl bg-[#F5EFE6] hover:bg-amber-50 text-[#4E342E] border border-[#E6DACE] hover:border-amber-400 transition">
+                class="relative p-2 rounded-xl bg-[#F5EFE6] hover:bg-amber-50 text-[#4E342E] border border-[#E6DACE] hover:border-amber-400 transition min-w-[38px] min-h-[38px] flex items-center justify-center">
                 <i data-lucide="bell" class="w-4 h-4"></i>
                 <span id="notifications-unread-badge"
                   class="hidden absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] font-extrabold items-center justify-center shadow-xs">0</span>
               </button>
               <div id="notifications-popover"
-                class="hidden absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-2xl shadow-2xl border border-[#E6DACE] z-50 overflow-hidden">
+                class="hidden fixed sm:absolute right-3 sm:right-0 left-3 sm:left-auto mt-2 sm:w-96 bg-white rounded-2xl shadow-2xl border border-[#E6DACE] z-50 overflow-hidden">
                 <!-- Preenchido via JS -->
               </div>
             </div>
 
             <!-- Badge do Usuário Logado (Abre Meu Perfil) -->
             <button id="header-user-badge" type="button" title="Abrir Meu Perfil e Alterar Senha"
-              class="flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl bg-[#F5EFE6] hover:bg-amber-50 border border-[#E6DACE] hover:border-amber-400 transition cursor-pointer">
+              class="flex items-center gap-2 pl-1.5 pr-2.5 py-1.5 rounded-xl bg-[#F5EFE6] hover:bg-amber-50 border border-[#E6DACE] hover:border-amber-400 transition cursor-pointer min-h-[38px]">
               <!-- Preenchido via JS -->
             </button>
 
             <!-- Botão Sair -->
             <button id="logout-btn" type="button" title="Voltar à tela de login"
-              class="p-2 rounded-xl text-[#6D4C41] hover:text-red-700 hover:bg-red-50 border border-[#E6DACE] transition">
+              class="p-2 rounded-xl text-[#6D4C41] hover:text-red-700 hover:bg-red-50 border border-[#E6DACE] transition min-w-[38px] min-h-[38px] flex items-center justify-center shrink-0">
               <i data-lucide="log-out" class="w-4 h-4"></i>
             </button>
           </div>
@@ -289,7 +292,7 @@
       </header>
 
       <!-- Área Principal de Conteúdo -->
-      <main id="main-content" class="flex-1 px-4 sm:px-6 lg:px-8 py-6 max-w-7xl w-full mx-auto">
+      <main id="main-content" class="main-safe-area flex-1 px-3.5 sm:px-6 lg:px-8 py-5 sm:py-6 max-w-7xl w-full mx-auto">
         <!-- Renderizado dinamicamente pelos módulos -->
       </main>
     </div>

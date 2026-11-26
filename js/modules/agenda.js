@@ -1,8 +1,10 @@
 /**
- * Módulo 3: Agenda Multi-Pastoral (Sincronizada Automaticamente)
- * - Unifica automaticamente todas as escalas do usuário logado com tag colorida da pastoral
- * - Exibe alerta visual amigável para conflitos no mesmo dia/horário
- * - Isolamento de gestão: Coordenadores criam/editam eventos apenas das pastorais que coordenam
+ * Módulo 3: Agenda Multi-Pastoral (Visão Completa da Pastoral + Destaque do Usuário)
+ * - Exibe todas as celebrações em que a(s) pastoral(is) do usuário participa(m), além de ensaios/eventos extras
+ * - Diferencia visualmente:
+ *   * Dias em que o usuário (ou irmão da Conta Familiar) ESTÁ ESCALADO: destaque escuro/dourado com estrela e selo "VOCÊ ESTÁ ESCALADO • [Função]"
+ *   * Dias com missa da pastoral em que o usuário NÃO está escalado: etiqueta discreta/suave ("19:00 • Matriz (Coroinhas)")
+ * - Legenda rápida no topo e botão "+ Novo Evento / Ensaio" para a Coordenação (coleção `eventos` no Firestore)
  */
 
 import { dataService } from '../services/dataService.js';
@@ -27,11 +29,11 @@ const now = new Date();
 let currentYear = now.getFullYear();
 let currentMonth = now.getMonth();
 let selectedDateISO = null;
-let showManagedPastoralSchedules = true;
 
 export function renderAgenda(container, { user }) {
   const anyCoord = isAnyCoordinator(user);
   const pastorals = dataService.getPastorals();
+  const pastoralMap = Object.fromEntries(pastorals.map((p) => [p.id, p]));
   const schedules = dataService.getSchedules();
   const events = dataService.getEvents();
   const roles = dataService.getRoles();
@@ -41,20 +43,31 @@ export function renderAgenda(container, { user }) {
     events,
     roles,
     pastorals,
-    includeManagedSchedules: anyCoord && showManagedPastoralSchedules,
+    includePastoralSchedules: true,
   });
 
   const monthPrefix = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
   const monthItems = items.filter((item) => item.date.startsWith(monthPrefix));
-  const displayedItems = selectedDateISO
+  const displayedItems = (selectedDateISO
     ? monthItems.filter((item) => item.date === selectedDateISO)
-    : monthItems;
+    : monthItems
+  ).slice().sort((a, b) => {
+    const dtCmp = `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`);
+    if (dtCmp !== 0) return dtCmp;
+    return Number(b.isPersonalSchedule) - Number(a.isPersonalSchedule);
+  });
 
   const itemsByDay = {};
   monthItems.forEach((item) => {
     if (!itemsByDay[item.date]) itemsByDay[item.date] = [];
     itemsByDay[item.date].push(item);
   });
+  Object.values(itemsByDay).forEach((arr) => {
+    arr.sort((a, b) => Number(b.isPersonalSchedule) - Number(a.isPersonalSchedule));
+  });
+
+  const personalMonthCount = monthItems.filter((i) => i.isPersonalSchedule).length;
+  const pastoralMonthCount = monthItems.filter((i) => i.isPastoralMass).length;
 
   const firstDayOfWeek = new Date(currentYear, currentMonth, 1).getDay();
   const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
@@ -67,39 +80,51 @@ export function renderAgenda(container, { user }) {
   for (let day = 1; day <= daysInMonth; day++) {
     const iso = `${monthPrefix}-${String(day).padStart(2, '0')}`;
     const dayItems = itemsByDay[iso] || [];
+    const hasPersonal = dayItems.some((it) => it.isPersonalSchedule);
+    const hasEvent = dayItems.some((it) => it.sourceType === 'event');
     const isToday = iso === todayISO;
     const isSelected = iso === selectedDateISO;
 
     cells.push(`
       <button type="button" data-cal-day="${iso}"
-        class="calendar-cell text-left p-1.5 sm:p-2 border-b border-r border-[#E6DACE]/60 align-top flex flex-col gap-1 transition ${
+        class="calendar-cell text-left p-1 sm:p-2 border-b border-r border-[#E6DACE]/60 align-top flex flex-col gap-1 transition ${
           isSelected
-            ? 'bg-amber-50 ring-2 ring-inset ring-[#B45309]'
-            : isToday
-              ? 'bg-amber-50/50 hover:bg-amber-50'
-              : 'bg-white hover:bg-[#FDFBF7]'
+            ? 'bg-amber-100/80 ring-2 ring-inset ring-[#B45309]'
+            : hasPersonal
+              ? 'bg-amber-50/75 hover:bg-amber-100/60'
+              : isToday
+                ? 'bg-[#FDFBF7] hover:bg-amber-50/40'
+                : 'bg-white hover:bg-[#FDFBF7]'
         }">
-        <div class="flex items-center justify-between">
-          <span class="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
-            isToday ? 'bg-[#3E2723] text-amber-400' : 'text-[#4E342E]'
+        <div class="flex items-center justify-between gap-0.5 w-full">
+          <span class="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-extrabold ${
+            hasPersonal
+              ? 'bg-[#D97706] text-white ring-2 ring-amber-300 shadow-xs'
+              : isToday
+                ? 'bg-[#3E2723] text-amber-400'
+                : 'text-[#4E342E]'
           }">${day}</span>
-          ${dayItems.length > 0 ? `<span class="text-[10px] font-bold text-[#8D6E63]">${dayItems.length}</span>` : ''}
+          ${
+            hasPersonal
+              ? `<span class="text-[11px] leading-none text-[#D97706]" title="Você está escalado neste dia">★</span>`
+              : hasEvent
+                ? `<span class="w-2 h-2 rounded-full bg-[#5D4037]" title="Evento / Ensaio"></span>`
+                : dayItems.length > 0
+                  ? `<span class="text-[10px] font-bold text-[#8D6E63]">${dayItems.length}</span>`
+                  : ''
+          }
         </div>
         <div class="space-y-1 overflow-hidden w-full">
           ${dayItems
             .slice(0, 2)
             .map((it) => {
-              const color = it.pastoral?.color || '#5D4037';
-              const style = it.isPersonalSchedule
-                ? `background-color:${color}22; color:${color}; border-color:${color}66;`
-                : '';
               const cls = it.isPersonalSchedule
-                ? 'font-bold'
+                ? 'bg-[#3E2723] text-amber-300 border-[#B45309] font-extrabold shadow-2xs'
                 : it.sourceType === 'event'
-                  ? 'bg-[#F5EFE6] text-[#3E2723] border-[#D7C4B2] font-semibold'
-                  : 'bg-stone-100 text-stone-600 border-stone-200 font-medium';
+                  ? 'bg-amber-50 text-[#4E342E] border-amber-300 font-semibold'
+                  : 'bg-[#F5EFE6]/85 text-[#6D4C41] border-[#E6DACE] font-medium';
               return `
-                <div class="truncate text-[10px] px-1.5 py-0.5 rounded border ${cls}" style="${style}" title="${escapeHtml(it.shortTag)}">
+                <div class="truncate text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.5 rounded border ${cls}" title="${escapeHtml(it.shortTag)}">
                   ${escapeHtml(it.shortTag)}
                 </div>
               `;
@@ -107,7 +132,7 @@ export function renderAgenda(container, { user }) {
             .join('')}
           ${
             dayItems.length > 2
-              ? `<div class="text-[10px] font-bold text-[#B45309] pl-1">+${dayItems.length - 2} mais</div>`
+              ? `<div class="text-[9px] sm:text-[10px] font-bold text-[#B45309] pl-0.5">+${dayItems.length - 2}</div>`
               : ''
           }
         </div>
@@ -119,9 +144,9 @@ export function renderAgenda(container, { user }) {
     <div class="space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h3 class="text-xl font-extrabold text-[#3E2723]">Agenda Paroquial &amp; Pessoal</h3>
+          <h3 class="text-xl font-extrabold text-[#3E2723]">Agenda da Pastoral &amp; Escala Pessoal</h3>
           <p class="text-sm text-[#6D4C41] mt-0.5">
-            Todas as suas escalas unificadas com a cor de cada pastoral, além de ensaios e reuniões.
+            Visualize todas as missas da sua pastoral com destaque imediato nos dias em que você está escalado.
           </p>
         </div>
 
@@ -129,14 +154,10 @@ export function renderAgenda(container, { user }) {
           ${
             anyCoord
               ? `
-            <label class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-[#E6DACE] text-xs font-semibold text-[#5D4037] cursor-pointer">
-              <input id="toggle-managed-schedules" type="checkbox" ${showManagedPastoralSchedules ? 'checked' : ''} class="rounded text-[#B45309]">
-              Exibir escalas das pastorais que coordeno
-            </label>
             <button id="btn-new-event" type="button"
               class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#3E2723] hover:bg-[#5D4037] text-white text-sm font-semibold shadow-sm transition">
               <i data-lucide="calendar-plus" class="w-4 h-4 text-amber-400"></i>
-              Novo Evento
+              + Novo Evento / Ensaio
             </button>
           `
               : ''
@@ -144,14 +165,32 @@ export function renderAgenda(container, { user }) {
         </div>
       </div>
 
+      <!-- Legenda Rápida -->
+      <div class="bg-white rounded-2xl border border-[#E6DACE] px-4 py-3 flex items-center justify-between gap-3 flex-wrap shadow-xs">
+        <div class="flex items-center gap-2.5 flex-wrap text-xs">
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-extrabold bg-[#3E2723] text-amber-300 border border-[#B45309]">
+            ⭐ Sua Escala (${personalMonthCount})
+          </span>
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-semibold bg-[#F5EFE6] text-[#5D4037] border border-[#E6DACE]">
+            <span class="w-2 h-2 rounded-full bg-[#8D6E63]"></span>
+            Missa da Pastoral (${pastoralMonthCount})
+          </span>
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-semibold bg-amber-50 text-[#78350F] border border-amber-300">
+            <span class="w-2 h-2 rounded-full bg-[#B45309]"></span>
+            Evento / Ensaio
+          </span>
+        </div>
+        <span class="text-[11px] text-[#8D6E63]">Toque em qualquer dia para filtrar os detalhes abaixo</span>
+      </div>
+
       <!-- Calendário Mensal -->
       <section class="bg-white rounded-2xl border border-[#E6DACE] shadow-xs overflow-hidden">
-        <div class="px-5 py-4 bg-[#3E2723] text-white flex items-center justify-between gap-3">
-          <div class="flex items-center gap-2">
+        <div class="px-4 sm:px-5 py-4 bg-[#3E2723] text-white flex items-center justify-between gap-2">
+          <div class="flex items-center gap-1.5 sm:gap-2">
             <button id="cal-prev" type="button" class="p-1.5 rounded-lg hover:bg-white/10 transition" aria-label="Mês anterior">
               <i data-lucide="chevron-left" class="w-5 h-5"></i>
             </button>
-            <h4 class="text-base sm:text-lg font-bold min-w-[170px] text-center">
+            <h4 class="text-sm sm:text-lg font-bold min-w-[140px] sm:min-w-[175px] text-center">
               ${MONTHS_PT[currentMonth]} de ${currentYear}
             </h4>
             <button id="cal-next" type="button" class="p-1.5 rounded-lg hover:bg-white/10 transition" aria-label="Próximo mês">
@@ -164,7 +203,7 @@ export function renderAgenda(container, { user }) {
           </button>
         </div>
 
-        <div class="grid grid-cols-7 bg-[#FAF6F0] border-b border-[#E6DACE] text-center text-[11px] font-bold uppercase tracking-wider text-[#6D4C41] py-2">
+        <div class="grid grid-cols-7 bg-[#FAF6F0] border-b border-[#E6DACE] text-center text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-[#6D4C41] py-2">
           <div>Dom</div><div>Seg</div><div>Ter</div><div>Qua</div><div>Qui</div><div>Sex</div><div>Sáb</div>
         </div>
         <div class="grid grid-cols-7 border-l border-[#E6DACE]/60">
@@ -172,12 +211,12 @@ export function renderAgenda(container, { user }) {
         </div>
       </section>
 
-      <!-- Lista de Compromissos -->
+      <!-- Lista de Compromissos e Missas da Pastoral -->
       <section class="bg-white rounded-2xl border border-[#E6DACE] shadow-xs overflow-hidden">
-        <div class="px-6 py-4 border-b border-[#E6DACE]/80 flex items-center justify-between gap-3 bg-[#FDFBF7]">
+        <div class="px-5 sm:px-6 py-4 border-b border-[#E6DACE]/80 flex items-center justify-between gap-3 bg-[#FDFBF7]">
           <div>
             <h4 class="text-base font-bold text-[#3E2723]">
-              ${selectedDateISO ? `Compromissos de ${formatDateBR(selectedDateISO)}` : `Compromissos de ${MONTHS_PT[currentMonth]}`}
+              ${selectedDateISO ? `Detalhes de ${formatDateBR(selectedDateISO)}` : `Programação de ${MONTHS_PT[currentMonth]}`}
             </h4>
             <p class="text-xs text-[#6D4C41]">${displayedItems.length} ${displayedItems.length === 1 ? 'registro encontrado' : 'registros encontrados'}</p>
           </div>
@@ -188,62 +227,88 @@ export function renderAgenda(container, { user }) {
           }
         </div>
 
-        <div class="p-5 space-y-3">
+        <div class="p-4 sm:p-5 space-y-3">
           ${
             displayedItems.length === 0
               ? `<div class="text-center py-8 text-[#8D6E63] text-sm">Nenhum compromisso registrado para este período.</div>`
               : displayedItems
                   .map((it) => {
-                    const borderColor = it.isPersonalSchedule
-                      ? it.pastoral?.color || '#D97706'
-                      : it.sourceType === 'event'
-                        ? '#5D4037'
-                        : '#D7C4B2';
+                    // 1. Card em DESTAQUE FORTE: Usuário (ou irmão da Conta Familiar) ESTÁ ESCALADO
+                    if (it.isPersonalSchedule) {
+                      return `
+                        <article class="rounded-2xl border-2 border-[#D97706] bg-gradient-to-r from-[#3E2723] via-[#4E342E] to-[#5D4037] text-white p-4 sm:p-5 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div class="space-y-2">
+                            <div class="flex items-center gap-2 flex-wrap">
+                              <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-amber-400 text-[#2B1B18] shadow-xs">
+                                <i data-lucide="star" class="w-3.5 h-3.5"></i>
+                                ${escapeHtml(it.eventType)}
+                              </span>
+                              <span class="text-xs font-extrabold text-amber-200 bg-white/10 px-2.5 py-0.5 rounded-lg border border-amber-300/30">
+                                ${escapeHtml(formatDateBR(it.date))} • ${escapeHtml(it.time)}
+                              </span>
+                              ${
+                                it.pastoral
+                                  ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-white/15 text-amber-100 border border-white/20">
+                                      ${escapeHtml(it.pastoral.shortName)}
+                                    </span>`
+                                  : ''
+                              }
+                              ${
+                                it.hasConflict
+                                  ? `<span class="inline-flex items-center gap-1 text-[11px] font-bold text-[#2B1B18] bg-amber-300 px-2 py-0.5 rounded-full">
+                                      <i data-lucide="clock-alert" class="w-3 h-3"></i>
+                                      Conflito de horário
+                                    </span>`
+                                  : ''
+                              }
+                            </div>
+                            <h5 class="text-base font-extrabold text-white">${escapeHtml(it.title)}</h5>
+                            <p class="text-xs text-amber-100/85 flex items-center gap-2 flex-wrap">
+                              <span class="capitalize font-semibold">${escapeHtml(formatWeekdayBR(it.date))}</span>
+                              <span>•</span>
+                              <span>${escapeHtml(it.location)}</span>
+                              ${it.description ? `<span>•</span><span>${escapeHtml(it.description)}</span>` : ''}
+                            </p>
+                          </div>
+                        </article>
+                      `;
+                    }
+
+                    // 2. Card DISCRETO: Missa da Pastoral (usuário NÃO está escalado) ou Evento/Ensaio
+                    const isEvt = it.sourceType === 'event';
+                    const pastoralBadges = Array.isArray(it.pastoralIds) && it.pastoralIds.length > 0
+                      ? it.pastoralIds.map((pid) => renderPastoralPill(pastoralMap[pid], { compact: true })).join('')
+                      : renderPastoralPill(it.pastoral, { compact: true });
+
                     return `
-                      <article class="rounded-xl border border-[#E6DACE] bg-[#FDFBF7] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                        style="border-left: 4px solid ${escapeHtml(borderColor)};">
+                      <article class="rounded-xl border ${
+                        isEvt ? 'border-amber-300 bg-amber-50/40' : 'border-[#E6DACE] bg-[#FDFBF7]/90'
+                      } p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div class="space-y-1.5">
                           <div class="flex items-center gap-2 flex-wrap">
-                            <span class="text-xs font-extrabold text-[#3E2723] bg-white px-2.5 py-0.5 rounded-lg border border-[#E6DACE]">
+                            <span class="text-xs font-bold text-[#4E342E] bg-white px-2.5 py-0.5 rounded-lg border border-[#E6DACE]">
                               ${escapeHtml(formatDateBR(it.date))} • ${escapeHtml(it.time)}
                             </span>
-                            ${renderPastoralPill(it.pastoral, { compact: true })}
-                            <span class="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                              it.isPersonalSchedule
-                                ? 'bg-[#D97706] text-white'
-                                : it.sourceType === 'event'
-                                  ? 'bg-[#4E342E] text-amber-200'
-                                  : 'bg-[#F5EFE6] text-[#5D4037]'
+                            ${pastoralBadges}
+                            <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                              isEvt
+                                ? 'bg-[#4E342E] text-amber-200'
+                                : 'bg-[#F5EFE6] text-[#6D4C41] border border-[#E6DACE]'
                             }">
                               ${escapeHtml(it.eventType)}
                             </span>
-                            ${
-                              it.isPersonalSchedule
-                                ? `<span class="text-xs font-bold text-[#92400E] bg-amber-100 border border-amber-300 px-2.5 py-0.5 rounded-full">
-                                    ${escapeHtml(it.shortTag)}
-                                  </span>`
-                                : ''
-                            }
-                            ${
-                              it.hasConflict
-                                ? `<span class="inline-flex items-center gap-1 text-[11px] font-bold text-amber-950 bg-amber-200/80 px-2 py-0.5 rounded-full">
-                                    <i data-lucide="clock-alert" class="w-3 h-3"></i>
-                                    Conflito de horário
-                                  </span>`
-                                : ''
-                            }
                           </div>
-                          <h5 class="text-sm font-bold text-[#3E2723]">${escapeHtml(it.title)}</h5>
-                          <p class="text-xs text-[#6D4C41] flex items-center gap-2 flex-wrap">
+                          <h5 class="text-sm font-bold text-[#4E342E]">
+                            ${escapeHtml(it.time)} • ${escapeHtml(it.location)}${it.pastoralLabels ? ` (${escapeHtml(it.pastoralLabels)})` : ''} — <span class="font-semibold text-[#6D4C41]">${escapeHtml(it.title.split(' • ')[0])}</span>
+                          </h5>
+                          <p class="text-xs text-[#8D6E63] flex items-center gap-2 flex-wrap">
                             <span class="capitalize">${escapeHtml(formatWeekdayBR(it.date))}</span>
-                            <span>•</span>
-                            <span>${escapeHtml(it.location)}</span>
                             ${it.description ? `<span>•</span><span>${escapeHtml(it.description)}</span>` : ''}
                           </p>
                         </div>
 
                         ${
-                          it.canEdit && it.sourceType === 'event'
+                          it.canEdit && isEvt
                             ? `
                           <div class="flex items-center gap-1 shrink-0">
                             <button type="button" data-edit-event="${it.sourceId}" class="p-2 rounded-lg text-[#6D4C41] hover:text-[#3E2723] hover:bg-white transition" title="Editar evento">
@@ -307,11 +372,6 @@ export function renderAgenda(container, { user }) {
     renderAgenda(container, { user });
   });
 
-  container.querySelector('#toggle-managed-schedules')?.addEventListener('change', (e) => {
-    showManagedPastoralSchedules = e.target.checked;
-    renderAgenda(container, { user });
-  });
-
   container.querySelector('#btn-new-event')?.addEventListener('click', () => {
     openEventModal(null, user, () => renderAgenda(container, { user }));
   });
@@ -344,12 +404,12 @@ function openEventModal(existing, user, onSaved) {
   const generalAdmin = isGeneralAdmin(user);
 
   openModal({
-    title: existing ? 'Editar Evento da Agenda' : 'Novo Evento na Agenda',
+    title: existing ? 'Editar Evento / Ensaio' : 'Novo Evento / Ensaio na Agenda',
     bodyHtml: `
       <form id="event-form" class="space-y-4">
         <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Título do Evento *</label>
-          <input name="title" required value="${escapeHtml(existing?.title || '')}" placeholder="Ex: Ensaio Geral de Liturgia"
+          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Título do Evento / Ensaio *</label>
+          <input name="title" required value="${escapeHtml(existing?.title || '')}" placeholder="Ex: Ensaio Geral de Coroinhas e Acólitos"
             class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
@@ -364,7 +424,7 @@ function openEventModal(existing, user, onSaved) {
             </select>
           </div>
           <div>
-            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Categoria do Evento *</label>
+            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Categoria *</label>
             <select name="type" class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm outline-none focus:border-[#B45309]">
               ${['Ensaio', 'Reunião', 'Formação', 'Celebração', 'Confraternização']
                 .map((t) => `<option value="${t}" ${existing?.type === t ? 'selected' : ''}>${t}</option>`)

@@ -48,9 +48,8 @@ import { renderResponses } from './modules/responses.js';
 const MENU_ITEMS = [
   { id: 'dashboard', label: 'Início', subtitle: 'Visão Geral das Pastorais', icon: 'layout-dashboard', permKey: 'dashboard' },
   { id: 'liturgy', label: 'Liturgia Diária', subtitle: 'Leituras da Paulus, Orações Eucarísticas e Roteiro do Celebrante', icon: 'book-open', permKey: 'liturgy' },
-  { id: 'my_dates', label: 'Minhas Datas', subtitle: 'Seus compromissos pessoais em ordem cronológica', icon: 'calendar-clock', permKey: 'my_dates' },
   { id: 'users', label: 'Gestão de Usuários', subtitle: 'Cadastro de membros, contas familiares e vínculos N:N', icon: 'users', permKey: 'users', badge: 'Gestão' },
-  { id: 'agenda', label: 'Agenda', subtitle: 'Calendário unificado com suas escalas e eventos', icon: 'calendar-days', permKey: 'agenda' },
+  { id: 'agenda', label: 'Agenda', subtitle: 'Calendário unificado da pastoral com destaque das suas escalas', icon: 'calendar-days', permKey: 'agenda' },
   { id: 'schedules', label: 'Escalas', subtitle: 'Visão Geral das Pastorais', icon: 'calendar-check-2', permKey: 'schedules_view' },
   { id: 'roles', label: 'Pastorais & Funções', subtitle: 'Cadastro de pastorais e funções vinculadas (1:N)', icon: 'sliders-horizontal', permKey: 'roles', badge: 'Gestão' },
   { id: 'locations', label: 'Locais', subtitle: 'Igrejas, capelas, salões e espaços da paróquia', icon: 'map-pin', permKey: 'locations', badge: 'Gestão' },
@@ -426,6 +425,7 @@ function bindGlobalEvents() {
     }
   });
 
+  document.getElementById('mobile-menu-btn')?.addEventListener('click', () => setMobileSidebar(true));
   document.getElementById('open-sidebar-btn')?.addEventListener('click', () => setMobileSidebar(true));
   document.getElementById('close-sidebar-btn')?.addEventListener('click', () => setMobileSidebar(false));
   document.getElementById('sidebar-backdrop')?.addEventListener('click', () => setMobileSidebar(false));
@@ -754,6 +754,13 @@ function openInstagramModal() {
 }
 
 function navigate(routeId, { preserveSchedulesTab = false } = {}) {
+  // Atalhos internos para "Minhas Datas" redirecionam automaticamente para Escalas -> aba Minhas Datas
+  if (routeId === 'my_dates') {
+    setSchedulesTab('my_dates');
+    routeId = 'schedules';
+    preserveSchedulesTab = true;
+  }
+
   const permissions = dataService.getPermissions();
   const item = MENU_ITEMS.find((m) => m.id === routeId);
   if (!item || item.external) return;

@@ -455,15 +455,22 @@ export function exportToCSV(filename, headers, rows) {
   URL.revokeObjectURL(url);
 }
 
-export function buildSyncedAgendaItems(user, { schedules, events, roles, pastorals, includeManagedSchedules = false }) {
+export function buildSyncedAgendaItems(user, { schedules, events, roles, pastorals, includePastoralSchedules = true }) {
   const roleMap = Object.fromEntries(roles.map((r) => [r.id, r.name]));
   const pastoralMap = Object.fromEntries(pastorals.map((p) => [p.id, p]));
   const slotIndex = buildUserTimeSlotIndex(schedules);
   const memberPastoralIds = new Set(getMemberPastoralIds(user, pastorals));
+  const coordOrAdmin = isAnyCoordinator(user);
   const items = [];
 
   const isFam = isFamilyAccount(user);
   const myAccountMembers = getAccountMembers(user);
+
+  const isCoordRoleId = (roleId) => {
+    if (!roleId) return false;
+    if (roleId === 'role_cor_coord' || roleId === 'role_aco_coord') return true;
+    return String(roleMap[roleId] || '').toLowerCase().includes('coordenador');
+  };
 
   schedules.forEach((sch) => {
     const myAssignments = (sch.assignments || []).filter((a) => a.userId === user.id);
@@ -473,49 +480,73 @@ export function buildSyncedAgendaItems(user, { schedules, events, roles, pastora
         const pastoral = pastoralMap[asg.pastoralId] || pastoralMap[sch.pastoralId];
         const roleName = roleMap[asg.roleId] || 'Função';
         const assignedMember = myAccountMembers.find((m) => m.id === asg.memberId) || myAccountMembers[0];
-        const memberFirst = getFirstName(assignedMember?.name || user.name);
+        const memberName = assignedMember?.name || user.name;
+        const memberFirst = getFirstName(memberName);
         const personKey = asg.memberId || asg.userId;
         items.push({
           id: `sync_${sch.id}_${asg.id}`,
           sourceId: sch.id,
           sourceType: 'schedule',
           isPersonalSchedule: true,
+          isPastoralMass: false,
           date: sch.date,
           time: sch.time,
           title: `${sch.celebrationType} • ${sch.location}`,
           shortTag: isFam
-            ? `${sch.time} - ${memberFirst} (${roleName})`
-            : `${sch.time} - ${sch.location} (${roleName})`,
-          roleNames: isFam ? `${roleName} • Escalado: ${assignedMember?.name || user.name}` : roleName,
+            ? `★ ${sch.time} ${memberFirst}`
+            : `★ ${sch.time} ${roleName}`,
+          assignedMemberName: memberName,
+          roleNames: roleName,
+          isCoordShift: isCoordRoleId(asg.roleId),
           location: sch.location,
           pastoral,
           pastoralId: pastoral?.id || sch.pastoralId,
-          eventType: 'Minha Escala',
-          description: sch.notes || (isFam ? `Escalado: ${assignedMember?.name} (${roleName})` : `Escalado(a) como ${roleName}`),
+          pastoralLabels: pastoral?.shortName || '',
+          eventType: isFam ? `ESCALADO: ${memberName} • ${roleName}` : `VOCÊ ESTÁ ESCALADO • ${roleName}`,
+          description: sch.notes || (isFam ? `Escalado: ${memberName} (${roleName})` : `Escalado(a) como ${roleName}`),
           hasSubRequest: Boolean(asg.substitutionRequested),
           hasConflict: hasTimeConflict(slotIndex, personKey, sch.date, sch.time),
         });
       });
-    } else if (includeManagedSchedules && canManageSchedule(user, sch)) {
-      const pastoral = pastoralMap[sch.pastoralId];
-      items.push({
-        id: `sync_mgmt_${sch.id}`,
-        sourceId: sch.id,
-        sourceType: 'schedule',
-        isPersonalSchedule: false,
-        date: sch.date,
-        time: sch.time,
-        title: `${sch.celebrationType} • ${pastoral?.shortName || 'Pastoral'}`,
-        shortTag: `${sch.time} - ${sch.location}`,
-        roleNames: '',
-        location: sch.location,
-        pastoral,
-        pastoralId: sch.pastoralId,
-        eventType: 'Escala da Pastoral',
-        description: sch.notes || '',
-        hasSubRequest: (sch.assignments || []).some((a) => a.substitutionRequested),
-        hasConflict: false,
-      });
+    } else if (includePastoralSchedules) {
+      // Exibe missas em que a(s) pastoral(is) do usuário participa(m), diferenciando do compromisso pessoal
+      const matchingPastoralIds = Array.from(
+        new Set(
+          (sch.assignments || [])
+            .filter((a) => coordOrAdmin || !isCoordRoleId(a.roleId))
+            .map((a) => a.pastoralId || sch.pastoralId)
+            .filter((pid) => isGeneralAdmin(user) || memberPastoralIds.has(pid)),
+        ),
+      );
+
+      if (matchingPastoralIds.length > 0) {
+        const mainPastoral = pastoralMap[matchingPastoralIds[0]] || pastoralMap[sch.pastoralId];
+        const labels = matchingPastoralIds
+          .map((pid) => pastoralMap[pid]?.shortName)
+          .filter(Boolean)
+          .join(' / ');
+        items.push({
+          id: `sync_pastoral_${sch.id}`,
+          sourceId: sch.id,
+          sourceType: 'schedule',
+          isPersonalSchedule: false,
+          isPastoralMass: true,
+          date: sch.date,
+          time: sch.time,
+          title: `${sch.celebrationType} • ${sch.location}`,
+          shortTag: `${sch.time} ${sch.location}${labels ? ` (${labels})` : ''}`,
+          roleNames: '',
+          location: sch.location,
+          pastoral: mainPastoral,
+          pastoralId: mainPastoral?.id || sch.pastoralId,
+          pastoralIds: matchingPastoralIds,
+          pastoralLabels: labels,
+          eventType: 'Missa da Pastoral',
+          description: sch.notes || `Escala ativa de ${labels || 'sua pastoral'} (você não está escalado neste horário)`,
+          hasSubRequest: false,
+          hasConflict: false,
+        });
+      }
     }
   });
 

@@ -31,6 +31,7 @@ import {
   getTodayISO,
   hasPermission,
   hasTimeConflict,
+  isAnyCoordinator,
   isFamilyAccount,
   isGeneralAdmin,
   openModal,
@@ -72,6 +73,7 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
   const accessiblePastoralSet = new Set(accessiblePastoralIds);
   const accessiblePastorals = pastorals.filter((p) => accessiblePastoralSet.has(p.id));
   const generalAdmin = isGeneralAdmin(user);
+  const isCoordOrAdmin = isAnyCoordinator(user);
   const canCreateEdit = hasPermission(user, 'schedules_manage', permissions) && coordPastoralIds.length > 0;
 
   const schedules = dataService
@@ -95,6 +97,9 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
     activeTab = 'my_dates';
   }
   if (activeTab === 'all_managed' && !generalAdmin) {
+    activeTab = 'my_dates';
+  }
+  if (activeTab === 'coordinators' && !isCoordOrAdmin) {
     activeTab = 'my_dates';
   }
 
@@ -141,7 +146,7 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
       color: p.color,
       managed: canCreateEdit && canManagePastoral(user, p.id),
     })),
-    { id: 'coordinators', label: 'Coordenadores', icon: 'crown', managed: false },
+    ...(isCoordOrAdmin ? [{ id: 'coordinators', label: 'Coordenadores', icon: 'crown', managed: false }] : []),
   ];
 
   const myAssignmentsCount = schedules.reduce(
@@ -152,10 +157,16 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
   const filtered = schedules.filter((sch) => {
     if (activeTab === 'all_managed') return true;
     if (activeTab === 'coordinators') {
+      if (!isCoordOrAdmin) return false;
       const coordAsgs = (sch.assignments || []).filter((a) => isCoordinatorRole(a.roleId, roleMap));
       if (coordAsgs.length === 0) return false;
       if (selectedCoordinatorFilter === 'all') return true;
       return coordAsgs.some((a) => a.userId === selectedCoordinatorFilter);
+    }
+    if (!isCoordOrAdmin) {
+      return (sch.assignments || []).some(
+        (a) => !isCoordinatorRole(a.roleId, roleMap) && (a.pastoralId || sch.pastoralId) === activeTab,
+      );
     }
     return sch.pastoralId === activeTab || (sch.assignments || []).some((a) => a.pastoralId === activeTab);
   });
@@ -269,7 +280,13 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
                   ? schedules.length
                   : t.id === 'coordinators'
                     ? coordSchedulesAll.length
-                    : schedules.filter((s) => s.pastoralId === t.id || (s.assignments || []).some((a) => a.pastoralId === t.id)).length;
+                    : isCoordOrAdmin
+                      ? schedules.filter((s) => s.pastoralId === t.id || (s.assignments || []).some((a) => a.pastoralId === t.id)).length
+                      : schedules.filter((s) =>
+                          (s.assignments || []).some(
+                            (a) => !isCoordinatorRole(a.roleId, roleMap) && (a.pastoralId || s.pastoralId) === t.id,
+                          ),
+                        ).length;
 
             return `
               <button type="button" data-tab="${t.id}"
@@ -308,9 +325,9 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
           .join('')}
       </div>
 
-      <!-- Filtro rápido por Coordenador Responsável (na aba Coordenadores) -->
+      <!-- Filtro rápido por Coordenador Responsável (apenas na aba Coordenadores para Coordenação) -->
       ${
-        activeTab === 'coordinators' && coordinatorFilterList.length > 0
+        isCoordOrAdmin && activeTab === 'coordinators' && coordinatorFilterList.length > 0
           ? `
         <div class="bg-white rounded-2xl border border-amber-300/80 p-3.5 flex items-center gap-2 flex-wrap shadow-xs">
           <span class="text-xs font-extrabold uppercase tracking-wider text-[#78350F] flex items-center gap-1.5 mr-1">
@@ -371,6 +388,7 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
           .map((sch) =>
             renderScheduleCard(sch, {
               user,
+              isCoordOrAdmin,
               canCreateEdit,
               accessiblePastoralSet,
               userMap,
@@ -466,13 +484,22 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
   refreshIcons();
 }
 
-function renderScheduleCard(sch, { user, canCreateEdit, accessiblePastoralSet, userMap, roleMap, pastoralMap, ctMap, slotIndex, allSchedules = [] }) {
-  const myAssignmentsHere = (sch.assignments || []).filter((a) => a.userId === user.id);
+function renderScheduleCard(sch, { user, isCoordOrAdmin = false, canCreateEdit, accessiblePastoralSet, userMap, roleMap, pastoralMap, ctMap, slotIndex, allSchedules = [] }) {
+  // Para Membro comum, exibe apenas integrantes das pastorais a que ele pertence e oculta o Plantão de Coordenação
+  const visibleAssignments = isCoordOrAdmin
+    ? sch.assignments || []
+    : (sch.assignments || []).filter(
+        (a) => !isCoordinatorRole(a.roleId, roleMap) && accessiblePastoralSet.has(a.pastoralId || sch.pastoralId),
+      );
+  const myAssignmentsHere = visibleAssignments.filter((a) => a.userId === user.id);
   const isUserAssigned = myAssignmentsHere.length > 0;
   const canEdit = canCreateEdit && canManageSchedule(user, sch);
   const countdown = getCountdownBadge(sch.date);
   const isPast = countdown.diffDays < 0;
-  const mainPastoral = pastoralMap[sch.pastoralId];
+  const cardPastoralId = isCoordOrAdmin
+    ? sch.pastoralId
+    : visibleAssignments[0]?.pastoralId || sch.pastoralId;
+  const mainPastoral = pastoralMap[cardPastoralId] || pastoralMap[sch.pastoralId];
   const ctObj = ctMap[sch.celebrationTypeId];
   const oe = getEucharisticPrayerById(sch.eucharisticPrayerId);
   const hasSpecialScript = Boolean(sch.celebrantScript || sch.eucharisticPrayerSource === 'custom');
@@ -579,8 +606,8 @@ function renderScheduleCard(sch, { user, canCreateEdit, accessiblePastoralSet, u
         <div class="p-5 space-y-2.5">
           <p class="text-[11px] font-bold uppercase tracking-wider text-[#8D6E63]">Equipe Escalada</p>
           ${[
-            ...(sch.assignments || []).filter((a) => isCoordinatorRole(a.roleId, roleMap)),
-            ...(sch.assignments || []).filter((a) => !isCoordinatorRole(a.roleId, roleMap)),
+            ...visibleAssignments.filter((a) => isCoordinatorRole(a.roleId, roleMap)),
+            ...visibleAssignments.filter((a) => !isCoordinatorRole(a.roleId, roleMap)),
           ]
             .map((asg) => {
               const isCoordShift = isCoordinatorRole(asg.roleId, roleMap);

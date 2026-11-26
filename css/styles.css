@@ -88,8 +88,43 @@
   min-height: 94px;
 }
 
+/* Responsividade e Safe-Area iPhone / Safari PWA */
+html,
+body {
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.topbar {
+  padding-top: max(12px, env(safe-area-inset-top));
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+.main-safe-area {
+  padding-bottom: max(24px, env(safe-area-inset-bottom));
+}
+
+#sidebar {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 1023px) {
+  #mobile-menu-btn {
+    display: inline-flex;
+    flex-shrink: 0;
+  }
+
+  .topbar > div {
+    padding-top: 6px;
+    padding-bottom: 10px;
+  }
+}
+
 @media (max-width: 640px) {
   .calendar-cell {
-    min-height: 66px;
+    min-height: 62px;
   }
 }

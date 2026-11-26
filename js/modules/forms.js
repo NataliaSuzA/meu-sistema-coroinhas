@@ -353,6 +353,27 @@ function openAnswerFormModal(form, user, { readOnly = false, initialRespondentId
               .join('')}
           </div>
         `;
+      } else if (q.type === 'checkbox') {
+        const selectedItems = new Set(
+          String(prevVal || '')
+            .split(/,\s*/)
+            .map((s) => s.trim())
+            .filter(Boolean),
+        );
+        inputHtml = `
+          <div class="space-y-2">
+            ${(q.options || [])
+              .map(
+                (opt) => `
+              <label class="flex items-center gap-2.5 px-3.5 py-2 rounded-xl border border-[#E6DACE] bg-[#FAF6F0] text-sm ${locked ? 'opacity-80' : 'hover:bg-white cursor-pointer'}">
+                <input type="checkbox" name="q_${q.id}" value="${escapeHtml(opt)}" ${locked ? 'disabled' : ''} ${selectedItems.has(opt) ? 'checked' : ''} class="rounded text-[#B45309]">
+                <span>${escapeHtml(opt)}</span>
+              </label>
+            `,
+              )
+              .join('')}
+          </div>
+        `;
       }
 
       return `
@@ -445,9 +466,18 @@ function openAnswerFormModal(form, user, { readOnly = false, initialRespondentId
           }
           const fd = new FormData(e.target);
           const answers = {};
-          form.questions.forEach((q) => {
-            answers[q.id] = String(fd.get(`q_${q.id}`) || '').trim();
-          });
+          for (const q of form.questions) {
+            if (q.type === 'checkbox') {
+              const picked = fd.getAll(`q_${q.id}`).map((v) => String(v).trim()).filter(Boolean);
+              if (q.required && picked.length === 0) {
+                showToast(`Selecione pelo menos uma opção em: "${q.text}".`, 'error');
+                return;
+              }
+              answers[q.id] = picked.join(', ');
+            } else {
+              answers[q.id] = String(fd.get(`q_${q.id}`) || '').trim();
+            }
+          }
           const res = dataService.saveResponse({
             formId: form.id,
             userId: user.id,
@@ -586,7 +616,8 @@ function openFormBuilderModal(existing, user, onSaved) {
             <div class="sm:col-span-4">
               <select class="q-type w-full px-2.5 py-2 rounded-lg border border-[#E6DACE] bg-white text-xs font-medium outline-none focus:border-[#B45309]">
                 <option value="text" ${qType === 'text' ? 'selected' : ''}>Texto Livre</option>
-                <option value="choice" ${qType === 'choice' ? 'selected' : ''}>Múltipla Escolha</option>
+                <option value="choice" ${qType === 'choice' ? 'selected' : ''}>Escolha Única</option>
+                <option value="checkbox" ${qType === 'checkbox' ? 'selected' : ''}>Múltipla Seleção (Várias)</option>
                 <option value="boolean" ${qType === 'boolean' ? 'selected' : ''}>Sim / Não</option>
               </select>
             </div>
@@ -596,7 +627,7 @@ function openFormBuilderModal(existing, user, onSaved) {
               </button>
             </div>
           </div>
-          <div class="q-options-wrap ${qType === 'choice' ? '' : 'hidden'}">
+          <div class="q-options-wrap ${qType === 'choice' || qType === 'checkbox' ? '' : 'hidden'}">
             <input type="text" class="q-options w-full px-3 py-1.5 rounded-lg border border-[#E6DACE] bg-white text-xs outline-none focus:border-[#B45309]"
               placeholder="Opções separadas por vírgula (ex: Manhã, Tarde, Noite)"
               value="${escapeHtml((preset?.options || []).join(', '))}">
@@ -610,7 +641,7 @@ function openFormBuilderModal(existing, user, onSaved) {
         const typeSel = row.querySelector('.q-type');
         const optsWrap = row.querySelector('.q-options-wrap');
         typeSel.addEventListener('change', () => {
-          optsWrap.classList.toggle('hidden', typeSel.value !== 'choice');
+          optsWrap.classList.toggle('hidden', typeSel.value !== 'choice' && typeSel.value !== 'checkbox');
         });
         row.querySelector('.remove-q-btn').addEventListener('click', () => row.remove());
 
@@ -642,7 +673,7 @@ function openFormBuilderModal(existing, user, onSaved) {
           const type = row.querySelector('.q-type').value;
           const required = row.querySelector('.q-required').checked;
           const options =
-            type === 'choice'
+            type === 'choice' || type === 'checkbox'
               ? row
                   .querySelector('.q-options')
                   .value.split(',')
@@ -658,8 +689,8 @@ function openFormBuilderModal(existing, user, onSaved) {
           showToast('Adicione pelo menos uma pergunta ao formulário.', 'error');
           return;
         }
-        if (questions.some((q) => q.type === 'choice' && q.options.length < 2)) {
-          showToast('Perguntas de múltipla escolha precisam de pelo menos 2 opções.', 'error');
+        if (questions.some((q) => (q.type === 'choice' || q.type === 'checkbox') && q.options.length < 2)) {
+          showToast('Perguntas de escolha precisam de pelo menos 2 opções.', 'error');
           return;
         }
 

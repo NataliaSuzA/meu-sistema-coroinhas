@@ -168,6 +168,7 @@ export function buildSeedData() {
     { id: 'loc_matriz', name: 'Matriz', type: 'Matriz', address: "Igreja Matriz Santa Teresa d'Ávila — Praça Santa Teresa, 100", active: true },
     { id: 'loc_sao_francisco', name: 'Comunidade São Francisco', type: 'Capela', address: 'Comunidade São Francisco', active: true },
     { id: 'loc_sav', name: 'Comunidade SAV', type: 'Capela', address: 'Comunidade SAV', active: true },
+    { id: 'loc_maria_goretti', name: 'Comunidade Maria Goretti', type: 'Capela', address: 'Comunidade Maria Goretti', active: true },
     { id: 'loc_salao', name: 'Salão Paroquial Santa Teresa', type: 'Salão', address: 'Anexo à Matriz', active: true },
   ];
 
