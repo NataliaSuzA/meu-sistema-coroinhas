@@ -341,20 +341,77 @@ export function getEucharisticPrayerById(id) {
   return EUCHARISTIC_PRAYERS.find((p) => p.id === id) || EUCHARISTIC_PRAYERS[1]; // Default OE II
 }
 
-export function getRecommendedEucharisticPrayerId(isoDate, liturgyData = null) {
-  const title = String(liturgyData?.liturgiaTitle || '').toLowerCase();
-  const color = String(liturgyData?.liturgicalColor || '').toLowerCase();
+function normalizeLiturgicalText(str) {
+  return String(str || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
 
-  if (title.includes('solenidade') || title.includes('páscoa') || title.includes('natal')) {
-    return 'oe_1';
+/**
+ * Seleciona a Oração Eucarística padrão fiel ao Missal Romano e ao livrinho da Paulus:
+ * 1) Se a Paulus indicar explicitamente uma OE (`oracaoEucaristicaSugerida`), usa-a diretamente.
+ * 2) Advento: Domingos/Solenidades -> OE III; Dias de semana -> OE II.
+ * 3) Quaresma e Celebrações Penitenciais -> Reconciliação I (nunca pela cor roxa isolada).
+ * 4) Natal, Páscoa, Pentecostes e Grandes Solenidades -> OE I (Cânon Romano).
+ * 5) Tempo Comum e demais dias: Domingos -> OE III; Dias de semana -> OE II.
+ */
+export function getRecommendedEucharisticPrayerId(isoDate, liturgyData = null) {
+  const explicitId = liturgyData?.oracaoEucaristicaSugerida || liturgyData?.detectedOEId || null;
+  if (explicitId && EUCHARISTIC_PRAYERS.some((p) => p.id === explicitId)) {
+    return explicitId;
   }
-  if (title.includes('quaresma') || title.includes('cinzas') || color.includes('roxo')) {
+
+  const text = normalizeLiturgicalText(
+    `${liturgyData?.liturgiaTitle || ''} ${liturgyData?.liturgicalSeason || ''}`,
+  );
+
+  let weekday = -1;
+  if (isoDate && isoDate.includes('-')) {
+    const [y, m, d] = isoDate.slice(0, 10).split('-').map(Number);
+    weekday = new Date(y, m - 1, d).getDay();
+  }
+  const isSunday = weekday === 0 || text.includes('domingo');
+
+  const isAdvent = text.includes('advento');
+  const isLentOrPenitential =
+    text.includes('quaresma') ||
+    text.includes('cinzas') ||
+    text.includes('penitencial') ||
+    text.includes('reconciliacao') ||
+    text.includes('semana santa') ||
+    text.includes('paixao do senhor');
+
+  const isGreatSolemnity =
+    text.includes('natal') ||
+    text.includes('pascoa') ||
+    text.includes('pentecostes') ||
+    text.includes('corpus christi') ||
+    text.includes('ascensao') ||
+    text.includes('santissima trindade') ||
+    text.includes('cristo rei') ||
+    text.includes('imaculada conceicao') ||
+    text.includes('todos os santos') ||
+    text.includes('solenidade');
+
+  // 1) Advento: Domingos e Solenidades -> OE III; Dias de semana -> OE II
+  if (isAdvent) {
+    return isSunday || isGreatSolemnity ? 'oe_3' : 'oe_2';
+  }
+
+  // 2) Quaresma e Celebrações Penitenciais -> Oração Eucarística da Reconciliação I
+  if (isLentOrPenitential) {
     return 'oe_rec_1';
   }
-  if (isoDate && isoDate.includes('-')) {
-    const [y, m, d] = isoDate.split('-').map(Number);
-    const weekday = new Date(y, m - 1, d).getDay();
-    if (weekday === 0) return 'oe_3'; // Domingos -> OE III
+
+  // 3) Natal, Páscoa, Pentecostes e Grandes Solenidades -> OE I (Cânon Romano)
+  if (isGreatSolemnity) {
+    return 'oe_1';
   }
-  return 'oe_2'; // Dias de semana -> OE II
+
+  // 4) Tempo Comum (e demais tempos): Domingos -> OE III; Dias de semana -> OE II
+  if (isSunday) {
+    return 'oe_3';
+  }
+  return 'oe_2';
 }

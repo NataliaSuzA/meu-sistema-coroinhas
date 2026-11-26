@@ -153,12 +153,12 @@ function detectEucharisticPrayer(fullText) {
     { id: 'oe_cri_3', re: /ora[çc][ãa]o\s+eucar[íi]stica\s+(?:para\s+)?missas?\s+com\s+crian[çc]as\s+iii\b/i },
     { id: 'oe_cri_2', re: /ora[çc][ãa]o\s+eucar[íi]stica\s+(?:para\s+)?missas?\s+com\s+crian[çc]as\s+ii\b/i },
     { id: 'oe_cri_1', re: /ora[çc][ãa]o\s+eucar[íi]stica\s+(?:para\s+)?missas?\s+com\s+crian[çc]as\s+i\b/i },
-    { id: 'oe_rec_2', re: /ora[çc][ãa]o\s+eucar[íi]stica\s+(?:da\s+)?reconcilia[çc][ãa]o\s+ii\b/i },
-    { id: 'oe_rec_1', re: /ora[çc][ãa]o\s+eucar[íi]stica\s+(?:da\s+)?reconcilia[çc][ãa]o\s+i\b/i },
-    { id: 'oe_4', re: /ora[çc][ãa]o\s+eucar[íi]stica\s+(?:iv|4)\b/i },
-    { id: 'oe_3', re: /ora[çc][ãa]o\s+eucar[íi]stica\s+(?:iii|3)\b/i },
-    { id: 'oe_2', re: /ora[çc][ãa]o\s+eucar[íi]stica\s+(?:ii|2)\b/i },
-    { id: 'oe_1', re: /(?:ora[çc][ãa]o\s+eucar[íi]stica\s+(?:i|1)\b|c[âa]non\s+romano)/i },
+    { id: 'oe_rec_2', re: /ora[çc][ãa]o\s+eucar[íi]stica\s+(?:da\s+)?reconcilia[çc][ãa]o\s+(?:ii|2)\b/i },
+    { id: 'oe_rec_1', re: /ora[çc][ãa]o\s+eucar[íi]stica\s+(?:da\s+)?reconcilia[çc][ãa]o(?:\s+(?:i|1))?\b/i },
+    { id: 'oe_4', re: /(?:ora[çc][ãa]o\s+eucar[íi]stica|\boe)\s+(?:iv|4)\b/i },
+    { id: 'oe_3', re: /(?:ora[çc][ãa]o\s+eucar[íi]stica|\boe)\s+(?:iii|3)\b/i },
+    { id: 'oe_2', re: /(?:ora[çc][ãa]o\s+eucar[íi]stica|\boe)\s+(?:ii|2)\b/i },
+    { id: 'oe_1', re: /(?:(?:ora[çc][ãa]o\s+eucar[íi]stica|\boe)\s+(?:i|1)\b|c[âa]non\s+romano)/i },
   ];
   for (const item of patterns) {
     if (item.re.test(txt)) return item.id;
@@ -391,6 +391,7 @@ function parsePaulusPortalHtml(html, dateInfo) {
       evangelho,
     },
     detectedEucharisticPrayerInPaulus: Boolean(detectedOE),
+    oracaoEucaristicaSugerida: detectedOE || null,
     detectedOEId: detectedOE || null,
   };
 }

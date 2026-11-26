@@ -1268,7 +1268,7 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
         const lit = await liturgyService.fetchLiturgyByDate(isoDate);
         litPreview.innerHTML = `<strong>${escapeHtml(lit.liturgiaTitle)}</strong> • Cor: <strong>${escapeHtml(lit.liturgicalColor)}</strong> • <span class="text-[#B45309]">${escapeHtml(lit.sourceLabel)}</span>`;
         if (overwriteOE) {
-          oeSelect.value = lit.defaultEucharisticPrayerId;
+          oeSelect.value = lit.oracaoEucaristicaSugerida || lit.defaultEucharisticPrayerId;
           oeSource = 'default';
           updateOEBadge();
         }

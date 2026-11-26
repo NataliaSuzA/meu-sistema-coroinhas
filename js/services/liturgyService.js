@@ -388,7 +388,7 @@ export const liturgyService = {
       return memoryCache.get(isoDate);
     }
 
-    const sessionKey = `psta_liturgy_v6_${isoDate}`;
+    const sessionKey = `psta_liturgy_v7_${isoDate}`;
     try {
       const cached = sessionStorage.getItem(sessionKey);
       if (cached) {
@@ -417,12 +417,14 @@ export const liturgyService = {
         const payload = await apiRes.json();
         if (payload?.ok && payload.data) {
           const d = payload.data;
+          const suggestedOE = d.oracaoEucaristicaSugerida || d.detectedOEId || null;
           result = {
             ...d,
             source: 'paulus',
             sourceLabel: '📖 Fonte: Liturgia Diária Oficial • Paulus',
+            oracaoEucaristicaSugerida: suggestedOE,
             defaultEucharisticPrayerId:
-              d.detectedOEId || getRecommendedEucharisticPrayerId(isoDate, d),
+              suggestedOE || getRecommendedEucharisticPrayerId(isoDate, d),
           };
         }
       }

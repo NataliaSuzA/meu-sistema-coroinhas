@@ -100,7 +100,7 @@ export async function renderLiturgy(container, { user }) {
   const baseOEId =
     activeSchedule && activeSchedule.eucharisticPrayerId
       ? activeSchedule.eucharisticPrayerId
-      : liturgy.defaultEucharisticPrayerId;
+      : liturgy.oracaoEucaristicaSugerida || liturgy.defaultEucharisticPrayerId;
   const activeOEId = manualOEOverride || baseOEId;
   const activeOE = getEucharisticPrayerById(activeOEId);
 
@@ -111,9 +111,11 @@ export async function renderLiturgy(container, { user }) {
     ? { label: 'Selecionada para leitura livre', cls: 'bg-[#F5EFE6] text-[#4E342E] border-[#D7C4B2]' }
     : isCustomByCelebrant
       ? { label: 'Escolhida no Roteiro do Celebrante', cls: 'bg-amber-100 text-[#92400E] border-amber-400' }
-      : liturgy.source === 'paulus'
-        ? { label: 'Fonte: Liturgia Diária Paulus', cls: 'bg-amber-100 text-[#78350F] border-amber-400' }
-        : { label: 'Padrão da Liturgia Diária', cls: 'bg-emerald-50 text-emerald-800 border-emerald-200' };
+      : liturgy.oracaoEucaristicaSugerida
+        ? { label: 'Indicada pela Paulus', cls: 'bg-amber-100 text-[#78350F] border-amber-400' }
+        : liturgy.source === 'paulus'
+          ? { label: 'Padrão Litúrgico • Paulus', cls: 'bg-amber-100 text-[#78350F] border-amber-400' }
+          : { label: 'Padrão da Liturgia Diária', cls: 'bg-emerald-50 text-emerald-800 border-emerald-200' };
 
   const sourceBadgeClass =
     liturgy.source === 'paulus'
