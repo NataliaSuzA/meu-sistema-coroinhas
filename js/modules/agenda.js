@@ -85,18 +85,47 @@ export function renderAgenda(container, { user }) {
     const isToday = iso === todayISO;
     const isSelected = iso === selectedDateISO;
 
+    // Até 3 bolinhas compactas (6px) para o modo mobile (< 768px)
+    const mobileDotsHtml = dayItems
+      .slice(0, 3)
+      .map((it) => {
+        if (it.isPersonalSchedule) {
+          return '<span class="w-1.5 h-1.5 rounded-full bg-[#D97706] ring-2 ring-amber-300/90 shrink-0" aria-hidden="true"></span>';
+        }
+        if (it.sourceType === 'event') {
+          return '<span class="w-1.5 h-1.5 rounded-full bg-[#5D4037] shrink-0" aria-hidden="true"></span>';
+        }
+        return '<span class="w-1.5 h-1.5 rounded-full bg-[#B8A394] shrink-0" aria-hidden="true"></span>';
+      })
+      .join('');
+
     cells.push(`
       <button type="button" data-cal-day="${iso}"
-        class="calendar-cell text-left p-1 sm:p-2 border-b border-r border-[#E6DACE]/60 align-top flex flex-col gap-1 transition ${
+        class="calendar-cell text-left md:p-2 border-b border-r border-[#E6DACE]/60 align-top flex flex-col justify-center md:justify-start gap-1 transition ${
           isSelected
-            ? 'bg-amber-100/80 ring-2 ring-inset ring-[#B45309]'
+            ? 'bg-amber-100/90 ring-2 ring-inset ring-[#B45309]'
             : hasPersonal
-              ? 'bg-amber-50/75 hover:bg-amber-100/60'
+              ? 'bg-amber-50/80 hover:bg-amber-100/60'
               : isToday
                 ? 'bg-[#FDFBF7] hover:bg-amber-50/40'
                 : 'bg-white hover:bg-[#FDFBF7]'
         }">
-        <div class="flex items-center justify-between gap-0.5 w-full">
+        <!-- Mobile (< 768px): número centralizado + até 3 bolinhas de 6px (sem textos cortados) -->
+        <div class="flex md:hidden flex-col items-center justify-center gap-1 w-full">
+          <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-extrabold ${
+            hasPersonal
+              ? 'bg-[#D97706] text-white ring-2 ring-amber-300 shadow-xs'
+              : isToday
+                ? 'bg-[#3E2723] text-amber-400'
+                : 'text-[#4E342E]'
+          }">${day}</span>
+          <div class="flex items-center justify-center gap-1 min-h-[6px]">
+            ${mobileDotsHtml}
+          </div>
+        </div>
+
+        <!-- Desktop (>= 768px): número + estrela + horários e etiquetas completas -->
+        <div class="hidden md:flex items-center justify-between gap-0.5 w-full">
           <span class="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-extrabold ${
             hasPersonal
               ? 'bg-[#D97706] text-white ring-2 ring-amber-300 shadow-xs'
@@ -114,7 +143,7 @@ export function renderAgenda(container, { user }) {
                   : ''
           }
         </div>
-        <div class="space-y-1 overflow-hidden w-full">
+        <div class="hidden md:block space-y-1 overflow-hidden w-full">
           ${dayItems
             .slice(0, 2)
             .map((it) => {
@@ -124,7 +153,7 @@ export function renderAgenda(container, { user }) {
                   ? 'bg-amber-50 text-[#4E342E] border-amber-300 font-semibold'
                   : 'bg-[#F5EFE6]/85 text-[#6D4C41] border-[#E6DACE] font-medium';
               return `
-                <div class="truncate text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.5 rounded border ${cls}" title="${escapeHtml(it.shortTag)}">
+                <div class="truncate text-[10px] px-1.5 py-0.5 rounded border ${cls}" title="${escapeHtml(it.shortTag)}">
                   ${escapeHtml(it.shortTag)}
                 </div>
               `;
@@ -132,7 +161,7 @@ export function renderAgenda(container, { user }) {
             .join('')}
           ${
             dayItems.length > 2
-              ? `<div class="text-[9px] sm:text-[10px] font-bold text-[#B45309] pl-0.5">+${dayItems.length - 2}</div>`
+              ? `<div class="text-[10px] font-bold text-[#B45309] pl-0.5">+${dayItems.length - 2} mais</div>`
               : ''
           }
         </div>
@@ -212,7 +241,7 @@ export function renderAgenda(container, { user }) {
       </section>
 
       <!-- Lista de Compromissos e Missas da Pastoral -->
-      <section class="bg-white rounded-2xl border border-[#E6DACE] shadow-xs overflow-hidden">
+      <section id="agenda-details-panel" class="bg-white rounded-2xl border border-[#E6DACE] shadow-xs overflow-hidden scroll-mt-24">
         <div class="px-5 sm:px-6 py-4 border-b border-[#E6DACE]/80 flex items-center justify-between gap-3 bg-[#FDFBF7]">
           <div>
             <h4 class="text-base font-bold text-[#3E2723]">
@@ -362,8 +391,15 @@ export function renderAgenda(container, { user }) {
   container.querySelectorAll('[data-cal-day]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const iso = btn.dataset.calDay;
-      selectedDateISO = selectedDateISO === iso ? null : iso;
+      const selecting = selectedDateISO !== iso;
+      selectedDateISO = selecting ? iso : null;
       renderAgenda(container, { user });
+      if (selecting && window.innerWidth < 768) {
+        container.querySelector('#agenda-details-panel')?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        });
+      }
     });
   });
 

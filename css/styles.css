@@ -1,6 +1,7 @@
 /* Identidade Visual Carmelita — Paróquia Santa Teresa d'Ávila */
 
 :root {
+  color-scheme: light;
   --carmel-deep: #2B1B18;
   --carmel-dark: #3E2723;
   --carmel-mid: #4E342E;
@@ -123,8 +124,9 @@ body {
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 767px) {
   .calendar-cell {
-    min-height: 62px;
+    min-height: 46px;
+    padding: 4px 2px;
   }
 }
