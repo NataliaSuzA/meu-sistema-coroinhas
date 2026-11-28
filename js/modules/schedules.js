@@ -19,6 +19,7 @@ import {
   canManagePastoral,
   canManageSchedule,
   closeModal,
+  doesMemberBelongToPastoral,
   escapeHtml,
   findConflictsForMember,
   formatDateBR,
@@ -1086,10 +1087,15 @@ export function openAcceptSubstitutionModal(scheduleId, assignmentId, user, onDo
   const users = dataService.getUsers();
   const userMap = Object.fromEntries(users.map((u) => [u.id, u]));
   const role = dataService.getRoleById(asg.roleId);
-  const pastoral = dataService.getPastoralById(asg.pastoralId || sch.pastoralId);
+  const pastoralId = asg.pastoralId || sch.pastoralId;
+  const pastoral = dataService.getPastoralById(pastoralId);
   const requesterName = resolveAssignedMemberName(userMap, asg.userId, asg.memberId);
   const isFam = isFamilyAccount(user);
-  const familyMembers = getAccountMembers(user);
+  const allFamilyMembers = getAccountMembers(user);
+  const eligibleFamilyMembers = isFam
+    ? allFamilyMembers.filter((m) => doesMemberBelongToPastoral(user, m, pastoralId))
+    : allFamilyMembers;
+  const familyMembers = eligibleFamilyMembers.length > 0 ? eligibleFamilyMembers : allFamilyMembers;
 
   openModal({
     title: 'Confirmar Aceite de Substituição',
@@ -1176,7 +1182,7 @@ export function openClaimVacancyModal(scheduleId, vacancyId, user, onDone) {
 
   const eligible = getEligibleMembersForVacancy(user, sch, vacancy);
   if (eligible.length === 0) {
-    showToast('Você (ou sua família) já está escalado nesta celebração ou não pertence a esta pastoral.', 'info');
+    showToast('Você (ou sua família) já está escalado(a) nesta pastoral nesta celebração ou não pertence a ela.', 'info');
     return;
   }
 
@@ -1555,18 +1561,45 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
         const date = dateInput.value;
         const time = timeInput.value;
         const warnings = [];
-        const pickedInForm = {};
+        const pickedInSamePastoralRole = {};
+        const pickedInSamePastoral = {};
 
         listEl.querySelectorAll('.position-row').forEach((row) => {
           const val = row.querySelector('.pos-user').value;
+          const rowPid = row.querySelector('.pos-pastoral')?.value || '';
+          const rowRoleId = row.querySelector('.pos-role')?.value || '';
           if (!val) return;
           const [accountId, memberId] = val.split('::');
           const personKey = memberId || accountId;
           const memberName = resolveAssignedMemberName(userMap, accountId, memberId);
-          pickedInForm[personKey] = (pickedInForm[personKey] || 0) + 1;
-          if (pickedInForm[personKey] === 2) {
-            warnings.push(`<strong>${escapeHtml(memberName)}</strong> foi selecionado(a) em mais de uma posição nesta mesma escala.`);
+          const pName = pastoralMap[rowPid]?.shortName || 'esta pastoral';
+
+          // Chave composta integranteId + pastoralId + roleId (bloqueada no submit)
+          if (rowPid && rowRoleId) {
+            const compositeRoleKey = `${personKey}::${rowPid}::${rowRoleId}`;
+            pickedInSamePastoralRole[compositeRoleKey] = (pickedInSamePastoralRole[compositeRoleKey] || 0) + 1;
+            if (pickedInSamePastoralRole[compositeRoleKey] === 2) {
+              const rName = roleMap[rowRoleId]?.name || 'esta função';
+              warnings.push(
+                `<strong>${escapeHtml(memberName)}</strong> está duplicado(a) na mesma pastoral e função (<strong>${escapeHtml(pName)} — ${escapeHtml(rName)}</strong>).`,
+              );
+            }
           }
+
+          // Aviso amigável apenas se repetido na MESMA pastoral (multi-pastoral em pastorais diferentes é 100% permitido)
+          if (rowPid) {
+            const compositePastoralKey = `${personKey}::${rowPid}`;
+            pickedInSamePastoral[compositePastoralKey] = (pickedInSamePastoral[compositePastoralKey] || 0) + 1;
+            if (
+              pickedInSamePastoral[compositePastoralKey] === 2 &&
+              !(rowRoleId && pickedInSamePastoralRole[`${personKey}::${rowPid}::${rowRoleId}`] >= 2)
+            ) {
+              warnings.push(
+                `<strong>${escapeHtml(memberName)}</strong> foi selecionado(a) em mais de uma função dentro de <strong>${escapeHtml(pName)}</strong> nesta escala.`,
+              );
+            }
+          }
+
           const external = findConflictsForMember(allSchedules, personKey, date, time, existing?.id);
           if (external.length > 0) {
             const detail = external
@@ -1581,7 +1614,7 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
             <div class="flex items-start gap-2">
               <i data-lucide="clock-alert" class="w-4 h-4 text-[#B45309] shrink-0 mt-0.5"></i>
               <div class="space-y-0.5">
-                <p class="font-bold text-[#92400E]">Aviso amigável de conflito de horário (permitido salvar):</p>
+                <p class="font-bold text-[#92400E]">Atenção na escala:</p>
                 ${warnings.map((w) => `<p>• ${w}</p>`).join('')}
               </div>
             </div>
@@ -2143,6 +2176,24 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
           return;
         }
 
+        // Bloqueia apenas duplicidade exata dentro da mesma pastoral + função (permite multi-pastoral na mesma missa)
+        const seenComposite = new Set();
+        for (const a of finalAssignments) {
+          const personKey = a.memberId || a.userId;
+          const compositeKey = `${personKey}::${a.pastoralId}::${a.roleId}`;
+          if (seenComposite.has(compositeKey)) {
+            const dupName = resolveAssignedMemberName(userMap, a.userId, a.memberId);
+            const dupPastoral = pastoralMap[a.pastoralId]?.shortName || 'Pastoral';
+            const dupRole = roleMap[a.roleId]?.name || 'Função';
+            showToast(
+              `${dupName} já está escalado(a) em ${dupPastoral} (${dupRole}) nesta celebração. Remova a linha duplicada.`,
+              'error',
+            );
+            return;
+          }
+          seenComposite.add(compositeKey);
+        }
+
         dataService.saveSchedule({
           id: existing?.id,
           date: fd.get('date'),
@@ -2170,13 +2221,36 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
   });
 }
 
-function openSubstitutionModal(scheduleId, assignmentId, onDone) {
+export function openSubstitutionModal(scheduleId, assignmentId, onDone) {
+  const sch = dataService.getScheduleById(scheduleId);
+  const asg = sch?.assignments?.find((a) => a.id === assignmentId);
+  const pastoral = asg ? dataService.getPastoralById(asg.pastoralId || sch.pastoralId) : null;
+  const role = asg ? dataService.getRoleById(asg.roleId) : null;
+  const userMap = Object.fromEntries(dataService.getUsers().map((u) => [u.id, u]));
+  const memberName = asg ? resolveAssignedMemberName(userMap, asg.userId, asg.memberId) : '';
+
   openModal({
     title: 'Solicitar Substituição',
     bodyHtml: `
       <form id="sub-form" class="space-y-4">
+        ${
+          sch && asg
+            ? `
+          <div class="rounded-xl bg-[#FAF6F0] border border-[#E6DACE] p-3 space-y-1.5 text-xs text-[#4E342E]">
+            <div class="flex items-center gap-2 flex-wrap">
+              ${renderPastoralPill(pastoral, { compact: true })}
+              <span class="font-extrabold text-[#3E2723]">${escapeHtml(role?.name || 'Função')}</span>
+              ${memberName ? `<span class="text-[#8D6E63]">•</span><span class="font-bold text-[#78350F]">${escapeHtml(memberName)}</span>` : ''}
+            </div>
+            <p class="text-[#6D4C41]">
+              ${escapeHtml(formatDateBR(sch.date))} às ${escapeHtml(sch.time)} • ${escapeHtml(sch.celebrationType)} (${escapeHtml(sch.location)})
+            </p>
+          </div>
+        `
+            : ''
+        }
         <p class="text-sm text-[#5D4037]">
-          Informe o motivo da sua indisponibilidade. Os colegas e coordenadores da sua pastoral serão notificados no sino para que alguém possa assumir sua vaga!
+          Informe o motivo da sua indisponibilidade. Os colegas e coordenadores da pastoral <strong>${escapeHtml(pastoral?.shortName || 'vinculada')}</strong> serão notificados no sino para que alguém possa assumir esta função!
         </p>
         <div>
           <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1.5">Motivo *</label>
@@ -2196,7 +2270,7 @@ function openSubstitutionModal(scheduleId, assignmentId, onDone) {
         dataService.requestSubstitution(scheduleId, assignmentId, String(new FormData(e.target).get('reason')));
         closeModal();
         showToast('Substituição solicitada! Os colegas da sua pastoral foram notificados.');
-        onDone();
+        onDone?.();
       });
     },
   });

@@ -8,6 +8,7 @@
  */
 
 import { dataService } from '../services/dataService.js';
+import { openSubstitutionModal } from './schedules.js';
 import {
   buildSyncedAgendaItems,
   closeModal,
@@ -275,10 +276,13 @@ export function renderAgenda(container, { user }) {
                   .map((it) => {
                     const isPersonal = Boolean(it.isPersonalSchedule);
                     const isEvt = it.sourceType === 'event';
-                    const famEntries =
-                      isPersonal && isFam && Array.isArray(it.familyEntries) && it.familyEntries.length > 0
-                        ? it.familyEntries
-                        : null;
+                    const isPastItem = it.date < todayISO;
+                    const personalEntries =
+                      isPersonal && Array.isArray(it.assignmentEntries) && it.assignmentEntries.length > 0
+                        ? it.assignmentEntries
+                        : isPersonal && Array.isArray(it.familyEntries) && it.familyEntries.length > 0
+                          ? it.familyEntries
+                          : [];
 
                     const cardClass = isPersonal
                       ? 'agenda-program-card-personal'
@@ -288,8 +292,8 @@ export function renderAgenda(container, { user }) {
 
                     // Linha 1 — Pílulas de pastoral deduplicadas
                     let pastoralBadges = '';
-                    if (famEntries) {
-                      const uniqPids = Array.from(new Set(famEntries.map((e) => e.pastoralId).filter(Boolean)));
+                    if (personalEntries.length > 0) {
+                      const uniqPids = Array.from(new Set(personalEntries.map((e) => e.pastoralId).filter(Boolean)));
                       pastoralBadges =
                         uniqPids.length > 0
                           ? uniqPids.map((pid) => renderPastoralPill(pastoralMap[pid], { compact: true })).join('')
@@ -305,7 +309,7 @@ export function renderAgenda(container, { user }) {
                     // Linha 1 — Pílula de categoria/status alinhada
                     const categoryPill = isPersonal
                       ? `<span class="agenda-status-personal inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2.5 py-0.5 rounded-full">★ ${
-                          famEntries || isFam ? 'Escala da Família' : 'Sua Escala'
+                          isFam ? 'Escala da Família' : 'Sua Escala'
                         }</span>`
                       : isEvt
                         ? `<span class="agenda-event-badge inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2.5 py-0.5 rounded-full">🟠 ${escapeHtml(
@@ -319,40 +323,59 @@ export function renderAgenda(container, { user }) {
                       ? `${baseName} • ${it.location}`
                       : baseName;
 
-                    // Linha 3 — Escalados (quando houver) e observação real (sem texto repetitivo)
-                    let assignedPillsHtml = '';
-                    if (famEntries) {
-                      assignedPillsHtml = famEntries
-                        .map(
-                          (entry) => `
-                            <span class="agenda-assigned-chip inline-flex items-center gap-1.5 flex-wrap">
-                              ${renderFamilyMemberPill(user, entry.memberId, { compact: true, fallbackName: entry.memberName })}
-                              ${
-                                entry.pastoral?.shortName
-                                  ? `<span class="text-[11px] font-semibold text-[#6D4C41]">• ${escapeHtml(entry.pastoral.shortName)}</span>`
-                                  : ''
-                              }
-                              <span class="text-[11px] font-bold text-[#3E2723]">• ${escapeHtml(entry.roleName)}</span>
-                            </span>
-                          `,
-                        )
-                        .join('');
-                    } else if (isPersonal) {
-                      const memberDisplay = it.assignedMemberName || user.name;
-                      assignedPillsHtml = `
-                        <span class="agenda-assigned-chip inline-flex items-center gap-1.5 flex-wrap px-2.5 py-0.5">
-                          <span class="text-[11px] font-extrabold text-[#78350F]">${escapeHtml(memberDisplay)}</span>
-                          ${
-                            it.pastoral?.shortName
-                              ? `<span class="text-[11px] font-semibold text-[#6D4C41]">• ${escapeHtml(it.pastoral.shortName)}</span>`
-                              : ''
-                          }
-                          ${
-                            it.roleNames
-                              ? `<span class="text-[11px] font-bold text-[#3E2723]">• ${escapeHtml(it.roleNames)}</span>`
-                              : ''
-                          }
-                        </span>
+                    // Linha 3 — Atribuições individuais (cada pastoral/função com sua tag e botão próprio de substituição)
+                    let assignedBlocksHtml = '';
+                    if (isPersonal && personalEntries.length > 0) {
+                      assignedBlocksHtml = `
+                        <div class="flex flex-col gap-1.5 w-full mt-1">
+                          ${personalEntries
+                            .map((entry) => `
+                              <div data-agenda-assignment-row="${escapeHtml(entry.assignmentId)}"
+                                class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white/95 border border-[#E7E0D6] rounded-xl px-2.5 py-1.5">
+                                <div class="flex items-center gap-1.5 flex-wrap">
+                                  ${
+                                    isFam
+                                      ? renderFamilyMemberPill(user, entry.memberId, { compact: true, fallbackName: entry.memberName })
+                                      : `<span class="text-[11px] font-extrabold text-[#78350F]">${escapeHtml(entry.memberName)}</span>`
+                                  }
+                                  ${renderPastoralPill(entry.pastoral, { compact: true })}
+                                  <span class="text-[11px] font-bold text-[#3E2723]">• ${escapeHtml(entry.roleName)}</span>
+                                  ${
+                                    entry.isCoordShift
+                                      ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-extrabold bg-[#3E2723] text-amber-300">👑 Plantão</span>`
+                                      : ''
+                                  }
+                                  ${
+                                    entry.hasSubRequest
+                                      ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 border border-red-300">Substituição Solicitada</span>`
+                                      : entry.substitutionAccepted
+                                        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">Substituição Confirmada</span>`
+                                        : ''
+                                  }
+                                </div>
+                                ${
+                                  !isPastItem
+                                    ? `<div class="shrink-0 self-end sm:self-center">
+                                        ${
+                                          !entry.hasSubRequest
+                                            ? `<button type="button" data-agenda-sub="${escapeHtml(entry.assignmentId)}" data-agenda-sch="${escapeHtml(entry.scheduleId)}"
+                                                class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold text-[#92400E] bg-amber-50 hover:bg-amber-100 border border-amber-300 transition">
+                                                <i data-lucide="refresh-cw" class="w-3 h-3"></i>
+                                                Solicitar Substituição
+                                              </button>`
+                                            : `<button type="button" data-agenda-cancel-sub="${escapeHtml(entry.assignmentId)}" data-agenda-sch="${escapeHtml(entry.scheduleId)}"
+                                                class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold text-[#5D4037] bg-white hover:bg-[#FAF6F0] border border-[#D7C4B2] transition">
+                                                <i data-lucide="x-circle" class="w-3 h-3 text-red-600"></i>
+                                                Cancelar Pedido
+                                              </button>`
+                                        }
+                                      </div>`
+                                    : ''
+                                }
+                              </div>
+                            `)
+                            .join('')}
+                        </div>
                       `;
                     }
 
@@ -386,12 +409,12 @@ export function renderAgenda(container, { user }) {
                             ${escapeHtml(standardizedTitle)}
                           </h5>
 
-                          <!-- Linha 3: Dia da Semana + Escalados (ou observação do evento) -->
+                          <!-- Linha 3: Dia da Semana + Atribuições Individuais (ou observação do evento) -->
                           <div class="text-xs text-[#6D4C41] flex items-center gap-2 flex-wrap">
                             <span class="capitalize font-semibold text-[#785A4E]">${escapeHtml(formatWeekdayBR(it.date))}</span>
-                            ${assignedPillsHtml}
                             ${cleanNotes}
                           </div>
+                          ${assignedBlocksHtml}
                         </div>
 
                         ${
@@ -474,6 +497,22 @@ export function renderAgenda(container, { user }) {
     btn.addEventListener('click', () => {
       const evt = dataService.getEvents().find((e) => e.id === btn.dataset.editEvent);
       if (evt) openEventModal(evt, user, () => renderAgenda(container, { user }));
+    });
+  });
+
+  container.querySelectorAll('[data-agenda-sub]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      openSubstitutionModal(btn.dataset.agendaSch, btn.dataset.agendaSub, () => {
+        renderAgenda(container, { user });
+      });
+    });
+  });
+
+  container.querySelectorAll('[data-agenda-cancel-sub]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      dataService.cancelSubstitutionRequest(btn.dataset.agendaSch, btn.dataset.agendaCancelSub);
+      showToast('Pedido de substituição cancelado. Escala mantida.');
+      renderAgenda(container, { user });
     });
   });
 

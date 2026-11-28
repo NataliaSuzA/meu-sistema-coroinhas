@@ -10,6 +10,7 @@ import {
   MONTHS_PT,
   addDaysToTodayISO,
   canManagePastoral,
+  doesMemberBelongToPastoral,
   escapeHtml,
   formatDateBR,
   formatWeekdayBR,
@@ -34,26 +35,12 @@ let sessionDateFilter = '';
 let summaryPastoralFilter = 'all';
 
 function memberBelongsToPastoral(user, member, pastoralId) {
-  if (!pastoralId || pastoralId === 'all') return true;
-  if (Array.isArray(member?.pastoralIds) && member.pastoralIds.length > 0) {
-    return member.pastoralIds.includes(pastoralId);
-  }
-  if (member?.pastoralId) {
-    return member.pastoralId === pastoralId;
-  }
-  return getUserMemberships(user).some((ms) => ms.pastoralId === pastoralId);
+  return doesMemberBelongToPastoral(user, member, pastoralId);
 }
 
 function getMemberScopedMemberships(user, member, { generalAdmin, managedIds }) {
   const accMemberships = getUserMemberships(user).filter((x) => generalAdmin || managedIds.has(x.pastoralId));
-  if (Array.isArray(member?.pastoralIds) && member.pastoralIds.length > 0) {
-    const set = new Set(member.pastoralIds);
-    return accMemberships.filter((x) => set.has(x.pastoralId));
-  }
-  if (member?.pastoralId) {
-    return accMemberships.filter((x) => x.pastoralId === member.pastoralId);
-  }
-  return accMemberships;
+  return accMemberships.filter((x) => doesMemberBelongToPastoral(user, member, x.pastoralId));
 }
 
 function buildAttendanceSessions(schedules, events, users, pastoralMap) {

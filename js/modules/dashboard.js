@@ -12,6 +12,7 @@ import {
   openAcceptSubstitutionModal,
   openClaimVacancyModal,
   openSchedulesWithOpenVacancies,
+  openSubstitutionModal,
 } from './schedules.js';
 import {
   buildUserTimeSlotIndex,
@@ -43,6 +44,7 @@ import {
   renderPastoralPill,
   renderPastoralPillsList,
   resolveAssignedMemberName,
+  showToast,
 } from '../utils/helpers.js';
 
 let dashboardPastoralFilter = 'all';
@@ -303,8 +305,9 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
       return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
     });
 
-  // Próximas 3 datas do usuário (ou de todos os irmãos em Contas Familiares)
-  const myUpcomingAssignments = [];
+  // Próximas 3 celebrações do usuário (agrupando múltiplas atribuições/pastorais ou irmãos na mesma missa)
+  const myUpcomingGroupsMap = new Map();
+  const memberOrderIndex = new Map(accountMembers.map((m, idx) => [m.id, idx]));
   schedules
     .filter((s) => s.date >= todayISO)
     .sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`))
@@ -315,17 +318,45 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
         if (dashboardPastoralFilter !== 'all' && pid !== dashboardPastoralFilter) return;
         const assignedName = resolveAssignedMemberName(userMap, asg.userId, asg.memberId);
         const personKey = asg.memberId || asg.userId;
-        myUpcomingAssignments.push({
+        const rName = roleMap[asg.roleId] || 'Função';
+        const isCoordShift =
+          asg.roleId === 'role_cor_coord' ||
+          asg.roleId === 'role_aco_coord' ||
+          rName.toLowerCase().includes('coordenador');
+
+        const groupKey = `${sch.date}|${sch.time}|${String(sch.location || '').trim().toLowerCase()}`;
+        let grp = myUpcomingGroupsMap.get(groupKey);
+        if (!grp) {
+          grp = {
+            key: groupKey,
+            schedule: sch,
+            countdown: getCountdownBadge(sch.date),
+            entries: [],
+          };
+          myUpcomingGroupsMap.set(groupKey, grp);
+        }
+        grp.entries.push({
           schedule: sch,
           assignment: asg,
           pastoral: pastoralMap[pid],
+          assignedMemberId: personKey,
           assignedName,
-          roleName: roleMap[asg.roleId] || 'Função',
-          countdown: getCountdownBadge(sch.date),
+          roleName: rName,
+          isCoordShift,
           hasConflict: hasTimeConflict(slotIndex, personKey, sch.date, sch.time),
         });
       });
     });
+
+  const myUpcomingAssignments = Array.from(myUpcomingGroupsMap.values()).map((g) => {
+    g.entries.sort(
+      (a, b) =>
+        (memberOrderIndex.get(a.assignedMemberId) ?? 99) - (memberOrderIndex.get(b.assignedMemberId) ?? 99) ||
+        String(a.pastoral?.shortName || '').localeCompare(String(b.pastoral?.shortName || ''), 'pt-BR') ||
+        String(a.roleName || '').localeCompare(String(b.roleName || ''), 'pt-BR'),
+    );
+    return g;
+  });
 
   const nextThree = myUpcomingAssignments.slice(0, 3);
 
@@ -642,62 +673,92 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
               : `
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
               ${nextThree
-                .map(({ schedule: sch, assignment: asg, pastoral, assignedName, roleName, countdown, hasConflict }) => `
+                .map(({ schedule: sch, countdown, entries }) => `
                   <article class="rounded-2xl border-2 border-amber-400/80 bg-gradient-to-b from-amber-50/50 to-white p-4 flex flex-col justify-between gap-3 shadow-xs">
-                    <div>
-                      <div class="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                    <div class="space-y-2.5">
+                      <div class="flex items-center justify-between gap-2 flex-wrap">
                         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${countdown.cls}">
                           ${escapeHtml(countdown.label)}
                         </span>
                         <span class="text-xs font-extrabold text-[#3E2723]">${escapeHtml(sch.time)}</span>
                       </div>
-                      <div class="flex items-center gap-1.5 flex-wrap mb-2">
-                        ${renderPastoralPill(pastoral, { compact: true })}
-                        ${
-                          isFam
-                            ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#3E2723] text-amber-300">
-                                Escalado: ${escapeHtml(assignedName)}
-                              </span>`
-                            : ''
-                        }
-                      </div>
-                      <h5 class="font-bold text-[#3E2723] text-sm">${escapeHtml(sch.celebrationType)}</h5>
-                      <p class="text-xs text-[#6D4C41] mt-0.5 capitalize">${escapeHtml(formatWeekdayBR(sch.date))}, ${escapeHtml(formatDateBR(sch.date))}</p>
 
-                      <div class="mt-3 space-y-1.5 text-xs text-[#5D4037]">
-                        <div class="flex items-center gap-2">
+                      <div>
+                        <h5 class="font-bold text-[#3E2723] text-sm">${escapeHtml(sch.celebrationType)}</h5>
+                        <p class="text-xs text-[#6D4C41] mt-0.5 capitalize">${escapeHtml(formatWeekdayBR(sch.date))}, ${escapeHtml(formatDateBR(sch.date))}</p>
+                        <div class="mt-1.5 flex items-center gap-1.5 text-xs text-[#5D4037]">
                           <i data-lucide="map-pin" class="w-3.5 h-3.5 text-[#B45309] shrink-0"></i>
                           <span class="font-medium">${escapeHtml(sch.location)}</span>
                         </div>
-                        <div class="flex items-center gap-2">
-                          <i data-lucide="bookmark-check" class="w-3.5 h-3.5 text-[#5D4037] shrink-0"></i>
-                          <span>Função: <strong class="text-[#3E2723]">${escapeHtml(roleName)}</strong></span>
-                        </div>
                       </div>
-                    </div>
 
-                    <div class="space-y-1.5">
-                      ${
-                        hasConflict
-                          ? `<div class="text-[11px] font-semibold text-amber-900 bg-amber-100 border border-amber-300 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
-                              <i data-lucide="clock-alert" class="w-3.5 h-3.5 shrink-0 text-[#B45309]"></i>
-                              Conflito no mesmo horário
-                            </div>`
-                          : ''
-                      }
-                      ${
-                        asg.substitutionRequested
-                          ? `<div class="text-[11px] font-semibold text-red-800 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
-                              <i data-lucide="alert-circle" class="w-3.5 h-3.5 shrink-0"></i>
-                              Substituição solicitada
-                            </div>`
-                          : asg.substitutionAccepted && asg.substitutedFromName
-                            ? `<div class="text-[11px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
-                                <i data-lucide="check-circle-2" class="w-3.5 h-3.5 shrink-0"></i>
-                                Substituindo ${escapeHtml(getFirstName(asg.substitutedFromName))}
-                              </div>`
-                            : ''
-                      }
+                      <!-- Atribuições individuais (cada pastoral/função com seu bloco e botão de substituição) -->
+                      <div class="space-y-2 pt-2 border-t border-amber-200/70">
+                        ${entries
+                          .map((entry) => {
+                            const asg = entry.assignment;
+                            const eSch = entry.schedule;
+                            return `
+                              <div data-dash-assignment-row="${escapeHtml(asg.id)}" class="rounded-xl bg-white/95 border border-[#E6DACE] p-2.5 space-y-1.5">
+                                <div class="flex items-center gap-1.5 flex-wrap">
+                                  ${renderPastoralPill(entry.pastoral, { compact: true })}
+                                  <span class="text-xs font-extrabold text-[#3E2723]">${escapeHtml(entry.roleName)}</span>
+                                  ${
+                                    entry.isCoordShift
+                                      ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-extrabold bg-[#3E2723] text-amber-300">👑 Plantão</span>`
+                                      : ''
+                                  }
+                                  ${
+                                    isFam
+                                      ? `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#3E2723] text-amber-300">
+                                          ${escapeHtml(entry.assignedName)}
+                                        </span>`
+                                      : ''
+                                  }
+                                </div>
+
+                                ${
+                                  entry.hasConflict
+                                    ? `<div class="text-[10px] font-semibold text-amber-900 bg-amber-100 border border-amber-300 rounded-md px-2 py-1 flex items-center gap-1">
+                                        <i data-lucide="clock-alert" class="w-3 h-3 shrink-0 text-[#B45309]"></i>
+                                        Conflito no mesmo horário
+                                      </div>`
+                                    : ''
+                                }
+                                ${
+                                  asg.substitutionRequested
+                                    ? `<div class="text-[10px] font-semibold text-red-800 bg-red-50 border border-red-200 rounded-md px-2 py-1 flex items-center gap-1">
+                                        <i data-lucide="alert-circle" class="w-3 h-3 shrink-0"></i>
+                                        Substituição solicitada
+                                      </div>`
+                                    : asg.substitutionAccepted && asg.substitutedFromName
+                                      ? `<div class="text-[10px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1 flex items-center gap-1">
+                                          <i data-lucide="check-circle-2" class="w-3 h-3 shrink-0"></i>
+                                          Substituindo ${escapeHtml(getFirstName(asg.substitutedFromName))}
+                                        </div>`
+                                      : ''
+                                }
+
+                                <div class="pt-0.5 flex justify-end">
+                                  ${
+                                    !asg.substitutionRequested
+                                      ? `<button type="button" data-dash-request-sub="${asg.id}" data-dash-sub-sch="${eSch.id}"
+                                          class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold text-[#92400E] bg-amber-50 hover:bg-amber-100 border border-amber-300 transition">
+                                          <i data-lucide="refresh-cw" class="w-3 h-3"></i>
+                                          Solicitar Substituição
+                                        </button>`
+                                      : `<button type="button" data-dash-cancel-sub="${asg.id}" data-dash-sub-sch="${eSch.id}"
+                                          class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold text-[#5D4037] bg-white hover:bg-[#FAF6F0] border border-[#D7C4B2] transition">
+                                          <i data-lucide="x-circle" class="w-3 h-3 text-red-600"></i>
+                                          Cancelar Pedido
+                                        </button>`
+                                  }
+                                </div>
+                              </div>
+                            `;
+                          })
+                          .join('')}
+                      </div>
                     </div>
                   </article>
                 `)
@@ -734,6 +795,24 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
         onNotificationsChanged?.();
         renderDashboard(container, { user, navigate, setHeaderContext, permissions, openFormDirectly, onNotificationsChanged });
       });
+    });
+  });
+
+  container.querySelectorAll('[data-dash-request-sub]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      openSubstitutionModal(btn.dataset.dashSubSch, btn.dataset.dashRequestSub, () => {
+        onNotificationsChanged?.();
+        renderDashboard(container, { user, navigate, setHeaderContext, permissions, openFormDirectly, onNotificationsChanged });
+      });
+    });
+  });
+
+  container.querySelectorAll('[data-dash-cancel-sub]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      dataService.cancelSubstitutionRequest(btn.dataset.dashSubSch, btn.dataset.dashCancelSub);
+      showToast('Pedido de substituição cancelado. Escala mantida.');
+      onNotificationsChanged?.();
+      renderDashboard(container, { user, navigate, setHeaderContext, permissions, openFormDirectly, onNotificationsChanged });
     });
   });
 

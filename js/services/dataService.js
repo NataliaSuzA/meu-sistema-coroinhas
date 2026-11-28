@@ -28,6 +28,7 @@ function normalizeFamilyMembers(user) {
       name: String(m.name || user.name || '').trim(),
       birthDate: m.birthDate || user.birthDate || '',
       pastoralId: m.pastoralId || '',
+      ...(Array.isArray(m.pastoralIds) ? { pastoralIds: m.pastoralIds } : {}),
     }));
   }
   return [
@@ -226,16 +227,24 @@ export const dataService = {
     const participants = [];
     accounts.forEach((acc) => {
       const members = normalizeFamilyMembers(acc);
+      const isMultiSiblingFamily = members.length > 1;
       members.forEach((m) => {
-        // Em contas familiares inter-pastorais, cada irmão aparece apenas na sua própria pastoral
-        if (m.pastoralId && m.pastoralId !== pastoralId) return;
+        // Em contas familiares inter-pastorais (2+ irmãos), respeita a(s) pastoral(is) individual(is) de cada irmão;
+        // em contas individuais (1 integrante), o array memberships autoriza todas as pastorais vinculadas à conta.
+        if (isMultiSiblingFamily) {
+          if (Array.isArray(m.pastoralIds) && m.pastoralIds.length > 0) {
+            if (!m.pastoralIds.includes(pastoralId)) return;
+          } else if (m.pastoralId && m.pastoralId !== pastoralId) {
+            return;
+          }
+        }
         participants.push({
           accountId: acc.id,
           memberId: m.id,
           name: m.name,
           birthDate: m.birthDate,
-          pastoralId: m.pastoralId || pastoralId,
-          isFamily: members.length > 1,
+          pastoralId,
+          isFamily: isMultiSiblingFamily,
           siblings: members.filter((x) => x.id !== m.id),
           accountName: acc.name,
           account: acc,
@@ -452,11 +461,16 @@ export const dataService = {
             ? currentSch.assignments.map((a) => ({ ...a }))
             : [];
 
-          const alreadyInMass = assignments.some(
-            (a) => (a.memberId || a.userId) === resolvedMemberId,
+          const alreadyInSamePastoral = assignments.some(
+            (a) =>
+              (a.memberId || a.userId) === resolvedMemberId &&
+              (a.pastoralId || currentSch.pastoralId) === targetVaga.pastoralId,
           );
-          if (alreadyInMass) {
-            return { ok: false, error: `${memberName} já está escalado(a) nesta celebração.` };
+          if (alreadyInSamePastoral) {
+            return {
+              ok: false,
+              error: `${memberName} já está escalado(a) na pastoral ${targetVaga.pastoralNome || ''} nesta celebração.`,
+            };
           }
 
           // Resolve o roleId correspondente na pastoral

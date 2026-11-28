@@ -94,25 +94,52 @@ export function renderFamilyMembersLegend(user) {
 }
 
 /**
+ * Verifica se um integrante específico (conta individual ou irmão de Conta Familiar)
+ * pertence à pastoral informada.
+ * - Conta individual (1 integrante): memberships da conta autoriza todas as suas pastorais (multi-pastoral).
+ * - Conta Familiar (2+ irmãos): respeita o cadastro individual (pastoralIds / pastoralId) de cada irmão.
+ */
+export function doesMemberBelongToPastoral(user, member, pastoralId) {
+  if (!pastoralId || pastoralId === 'all') return true;
+  if (!user) return false;
+  const userHasPastoral = getUserMemberships(user).some((ms) => ms.pastoralId === pastoralId);
+  const members = getAccountMembers(user);
+  if (members.length <= 1) {
+    if (Array.isArray(member?.pastoralIds) && member.pastoralIds.length > 0) {
+      return member.pastoralIds.includes(pastoralId) || userHasPastoral;
+    }
+    return userHasPastoral || member?.pastoralId === pastoralId;
+  }
+  if (Array.isArray(member?.pastoralIds) && member.pastoralIds.length > 0) {
+    return member.pastoralIds.includes(pastoralId);
+  }
+  if (member?.pastoralId) {
+    return member.pastoralId === pastoralId;
+  }
+  return userHasPastoral;
+}
+
+/**
  * Retorna a lista de integrantes elegíveis da conta logada (individual ou Conta Familiar)
- * que pertencem à pastoral da vaga aberta e ainda NÃO estão escalados naquela celebração.
+ * que pertencem à pastoral da vaga aberta e ainda NÃO estão escalados NAQUELA MESMA PASTORAL
+ * nesta celebração (chave composta: integranteId + pastoralId).
  */
 export function getEligibleMembersForVacancy(user, schedule, vacancy) {
   if (!user || !schedule || !vacancy || Number(vacancy.quantidade) <= 0) return [];
   const targetPid = vacancy.pastoralId;
   if (!targetPid) return [];
 
-  const userHasPastoral = getUserMemberships(user).some((m) => m.pastoralId === targetPid);
-  const assignedMemberIds = new Set(
-    (schedule.assignments || []).map((a) => a.memberId || a.userId),
+  const assignedInSamePastoral = new Set(
+    (schedule.assignments || []).map(
+      (a) => `${a.memberId || a.userId}::${a.pastoralId || schedule.pastoralId || ''}`,
+    ),
   );
   const members = getAccountMembers(user);
 
   return members
     .filter((m) => {
-      const belongsToPastoral = m.pastoralId ? m.pastoralId === targetPid : userHasPastoral;
-      if (!belongsToPastoral) return false;
-      if (assignedMemberIds.has(m.id)) return false;
+      if (!doesMemberBelongToPastoral(user, m, targetPid)) return false;
+      if (assignedInSamePastoral.has(`${m.id}::${targetPid}`)) return false;
       return true;
     })
     .map((m) => ({
@@ -618,102 +645,89 @@ export function buildSyncedAgendaItems(user, { schedules, events, roles, pastora
     const myAssignments = (sch.assignments || []).filter((a) => a.userId === user.id);
 
     if (myAssignments.length > 0) {
-      if (isFam) {
-        const groupKey = `${sch.date}|${sch.time}|${String(sch.location || '').trim().toLowerCase()}`;
-        let group = personalGroupsByKey.get(groupKey);
-        if (!group) {
-          group = {
-            id: `sync_fam_${groupKey}`,
-            sourceId: sch.id,
-            sourceType: 'schedule',
-            isPersonalSchedule: true,
-            isPastoralMass: false,
-            isFamilyGrouped: true,
-            date: sch.date,
-            time: sch.time,
-            title: `${sch.celebrationType} • ${sch.location}`,
-            shortTag: '',
-            location: sch.location,
-            pastoral: pastoralMap[sch.pastoralId],
-            pastoralId: sch.pastoralId,
-            pastoralLabels: '',
-            eventType: 'ESCALA DA FAMÍLIA',
-            description: sch.notes || '',
-            hasSubRequest: false,
-            hasConflict: false,
-            familyEntries: [],
-          };
-          personalGroupsByKey.set(groupKey, group);
-          items.push(group);
-        }
+      const groupKey = `${sch.date}|${sch.time}|${String(sch.location || '').trim().toLowerCase()}`;
+      let group = personalGroupsByKey.get(groupKey);
+      if (!group) {
+        group = {
+          id: `sync_pers_${groupKey}`,
+          sourceId: sch.id,
+          sourceType: 'schedule',
+          isPersonalSchedule: true,
+          isPastoralMass: false,
+          isFamilyGrouped: isFam,
+          date: sch.date,
+          time: sch.time,
+          title: `${sch.celebrationType} • ${sch.location}`,
+          shortTag: '',
+          location: sch.location,
+          pastoral: pastoralMap[sch.pastoralId],
+          pastoralId: sch.pastoralId,
+          pastoralIds: [],
+          pastoralLabels: '',
+          eventType: isFam ? 'ESCALA DA FAMÍLIA' : 'SUA ESCALA',
+          description: sch.notes || '',
+          hasSubRequest: false,
+          hasConflict: false,
+          assignmentEntries: [],
+          familyEntries: [],
+        };
+        personalGroupsByKey.set(groupKey, group);
+        items.push(group);
+      }
 
-        myAssignments.forEach((asg) => {
-          const pastoral = pastoralMap[asg.pastoralId] || pastoralMap[sch.pastoralId];
-          const roleName = roleMap[asg.roleId] || 'Função';
-          const assignedMember = myAccountMembers.find((m) => m.id === asg.memberId) || myAccountMembers[0];
-          const memberId = assignedMember?.id || asg.memberId || user.id;
-          const memberName = assignedMember?.name || user.name;
-          const personKey = asg.memberId || asg.userId;
-          const conflict = hasTimeConflict(slotIndex, personKey, sch.date, sch.time);
+      myAssignments.forEach((asg) => {
+        const pastoral = pastoralMap[asg.pastoralId] || pastoralMap[sch.pastoralId];
+        const roleName = roleMap[asg.roleId] || 'Função';
+        const assignedMember = myAccountMembers.find((m) => m.id === asg.memberId) || myAccountMembers[0];
+        const memberId = assignedMember?.id || asg.memberId || user.id;
+        const memberName = assignedMember?.name || user.name;
+        const personKey = asg.memberId || asg.userId;
+        const conflict = hasTimeConflict(slotIndex, personKey, sch.date, sch.time);
 
-          group.familyEntries.push({
-            scheduleId: sch.id,
-            assignmentId: asg.id,
-            memberId,
-            memberName,
-            pastoral,
-            pastoralId: pastoral?.id || sch.pastoralId,
-            roleName,
-            isCoordShift: isCoordRoleId(asg.roleId),
-            hasSubRequest: Boolean(asg.substitutionRequested),
-            hasConflict: conflict,
-          });
-          if (asg.substitutionRequested) group.hasSubRequest = true;
-          if (conflict) group.hasConflict = true;
+        group.assignmentEntries.push({
+          scheduleId: sch.id,
+          assignmentId: asg.id,
+          memberId,
+          memberName,
+          pastoral,
+          pastoralId: pastoral?.id || sch.pastoralId,
+          roleName,
+          isCoordShift: isCoordRoleId(asg.roleId),
+          hasSubRequest: Boolean(asg.substitutionRequested),
+          substitutionReason: asg.substitutionReason || '',
+          substitutionAccepted: Boolean(asg.substitutionAccepted),
+          substitutedFromName: asg.substitutedFromName || '',
+          hasConflict: conflict,
         });
+        if (asg.substitutionRequested) group.hasSubRequest = true;
+        if (conflict) group.hasConflict = true;
+      });
 
-        group.familyEntries.sort(
-          (a, b) => (memberOrderIndex.get(a.memberId) ?? 99) - (memberOrderIndex.get(b.memberId) ?? 99),
-        );
-        const uniqueFirstNames = Array.from(new Set(group.familyEntries.map((e) => getFirstName(e.memberName))));
-        group.shortTag = `★ ${sch.time} ${uniqueFirstNames.join(' & ')}`;
-        group.assignedMemberName = uniqueFirstNames.join(' & ');
-        group.roleNames = group.familyEntries.map((e) => e.roleName).join(' / ');
-        group.pastoral = group.familyEntries[0]?.pastoral || group.pastoral;
-        group.pastoralLabels = Array.from(
-          new Set(group.familyEntries.map((e) => e.pastoral?.shortName).filter(Boolean)),
-        ).join(' / ');
-      } else {
-        myAssignments.forEach((asg) => {
-          const pastoral = pastoralMap[asg.pastoralId] || pastoralMap[sch.pastoralId];
-          const roleName = roleMap[asg.roleId] || 'Função';
-          const assignedMember = myAccountMembers.find((m) => m.id === asg.memberId) || myAccountMembers[0];
-          const memberName = assignedMember?.name || user.name;
-          const personKey = asg.memberId || asg.userId;
-          items.push({
-            id: `sync_${sch.id}_${asg.id}`,
-            sourceId: sch.id,
-            sourceType: 'schedule',
-            isPersonalSchedule: true,
-            isPastoralMass: false,
-            date: sch.date,
-            time: sch.time,
-            title: `${sch.celebrationType} • ${sch.location}`,
-            shortTag: `★ ${sch.time} ${roleName}`,
-            assignedMemberId: assignedMember?.id || asg.memberId || user.id,
-            assignedMemberName: memberName,
-            roleNames: roleName,
-            isCoordShift: isCoordRoleId(asg.roleId),
-            location: sch.location,
-            pastoral,
-            pastoralId: pastoral?.id || sch.pastoralId,
-            pastoralLabels: pastoral?.shortName || '',
-            eventType: `VOCÊ ESTÁ ESCALADO • ${roleName}`,
-            description: sch.notes || `Escalado(a) como ${roleName}`,
-            hasSubRequest: Boolean(asg.substitutionRequested),
-            hasConflict: hasTimeConflict(slotIndex, personKey, sch.date, sch.time),
-          });
-        });
+      group.assignmentEntries.sort(
+        (a, b) =>
+          (memberOrderIndex.get(a.memberId) ?? 99) - (memberOrderIndex.get(b.memberId) ?? 99) ||
+          String(a.pastoral?.shortName || '').localeCompare(String(b.pastoral?.shortName || ''), 'pt-BR') ||
+          String(a.roleName || '').localeCompare(String(b.roleName || ''), 'pt-BR'),
+      );
+      group.familyEntries = group.assignmentEntries;
+
+      const uniqueFirstNames = Array.from(new Set(group.assignmentEntries.map((e) => getFirstName(e.memberName))));
+      const uniquePastoralIds = Array.from(new Set(group.assignmentEntries.map((e) => e.pastoralId).filter(Boolean)));
+      group.assignedMemberId = group.assignmentEntries[0]?.memberId || user.id;
+      group.assignedMemberName = isFam ? uniqueFirstNames.join(' & ') : group.assignmentEntries[0]?.memberName || user.name;
+      group.roleNames = group.assignmentEntries.map((e) => e.roleName).join(' / ');
+      group.shortTag = isFam
+        ? `★ ${sch.time} ${uniqueFirstNames.join(' & ')}`
+        : `★ ${sch.time} ${group.roleNames}`;
+      group.pastoral = group.assignmentEntries[0]?.pastoral || group.pastoral;
+      group.pastoralIds = uniquePastoralIds;
+      group.pastoralLabels = Array.from(
+        new Set(group.assignmentEntries.map((e) => e.pastoral?.shortName).filter(Boolean)),
+      ).join(' / ');
+      if (!isFam && group.assignmentEntries.length === 1) {
+        group.eventType = `VOCÊ ESTÁ ESCALADO • ${group.assignmentEntries[0].roleName}`;
+      } else if (!isFam) {
+        group.eventType = `SUA ESCALA (${group.assignmentEntries.length} FUNÇÕES)`;
       }
     } else if (includePastoralSchedules) {
       // Exibe missas em que a(s) pastoral(is) do usuário participa(m), diferenciando do compromisso pessoal

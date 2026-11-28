@@ -96,7 +96,8 @@ export function renderMyDatesContent(targetEl, { user, onChanged, onNotification
         (a, b) =>
           (memberOrderIndex.get(a.assignedMemberId) ?? 99) -
             (memberOrderIndex.get(b.assignedMemberId) ?? 99) ||
-          a.assignedName.localeCompare(b.assignedName, 'pt-BR'),
+          String(a.pastoral?.shortName || '').localeCompare(String(b.pastoral?.shortName || ''), 'pt-BR') ||
+          String(a.roleName || '').localeCompare(String(b.roleName || ''), 'pt-BR'),
       );
       return g;
     })
@@ -177,8 +178,18 @@ export function renderMyDatesContent(targetEl, { user, onChanged, onNotification
               const { schedule: sch, countdown, entries } = group;
               const isPast = countdown.diffDays < 0;
 
-              // Card para Conta Familiar (agrupado por celebração, com linha individual por irmão)
-              if (isFam) {
+              // Card agrupado por celebração com linha individual por atribuição:
+              // usado para Contas Familiares E para integrantes individuais com 2+ atribuições/pastorais na mesma missa
+              if (isFam || entries.length > 1) {
+                const uniqueMemberCount = new Set(entries.map((e) => e.assignedMemberId)).size;
+                const multiBadgeLabel =
+                  isFam && uniqueMemberCount > 1
+                    ? entries.length > uniqueMemberCount
+                      ? `${uniqueMemberCount} irmãos • ${entries.length} funções`
+                      : `${uniqueMemberCount} irmãos nesta missa`
+                    : entries.length > 1
+                      ? `${entries.length} funções nesta missa`
+                      : '';
                 return `
                   <article data-family-celebration-card="${escapeHtml(group.key)}" class="bg-white rounded-2xl border-2 ${
                     isPast ? 'border-[#E6DACE] opacity-85' : 'user-schedule-card'
@@ -204,10 +215,10 @@ export function renderMyDatesContent(targetEl, { user, onChanged, onNotification
                               ${escapeHtml(countdown.label)}
                             </span>
                             ${
-                              entries.length > 1
+                              multiBadgeLabel
                                 ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#FAF6F0] text-[#5D4037] border border-[#E6DACE]">
-                                    <i data-lucide="users" class="w-3 h-3 text-[#B45309]"></i>
-                                    ${entries.length} irmãos nesta missa
+                                    <i data-lucide="${isFam && uniqueMemberCount > 1 ? 'users' : 'layers'}" class="w-3 h-3 text-[#B45309]"></i>
+                                    ${escapeHtml(multiBadgeLabel)}
                                   </span>`
                                 : ''
                             }
@@ -230,17 +241,17 @@ export function renderMyDatesContent(targetEl, { user, onChanged, onNotification
                       </button>
                     </div>
 
-                    <!-- Lista individual de irmãos escalados nesta celebração -->
+                    <!-- Lista individual de atribuições nesta celebração (com substituição independente) -->
                     <div class="pt-3 border-t border-[#E6DACE]/80 space-y-2">
                       ${entries
                         .map((entry) => {
                           const asg = entry.assignment;
                           const eSch = entry.schedule;
                           return `
-                            <div class="rounded-xl bg-[#FAF6F0] border border-[#E6DACE] px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                            <div data-md-assignment-row="${escapeHtml(asg.id)}" class="rounded-xl bg-[#FAF6F0] border border-[#E6DACE] px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                               <div class="space-y-1 min-w-0">
                                 <div class="flex items-center gap-2 flex-wrap">
-                                  ${renderFamilyMemberPill(user, entry.assignedMemberId, { fallbackName: entry.assignedName })}
+                                  ${isFam ? renderFamilyMemberPill(user, entry.assignedMemberId, { fallbackName: entry.assignedName }) : ''}
                                   ${renderPastoralPill(entry.pastoral, { compact: true })}
                                   <span class="text-xs font-extrabold text-[#3E2723]">${escapeHtml(entry.roleName)}</span>
                                   ${
@@ -454,12 +465,35 @@ export function renderMyDates(container, { user, setHeaderContext, openLiturgyFo
 }
 
 function openQuickSubModal(scheduleId, assignmentId, onDone) {
+  const sch = dataService.getScheduleById(scheduleId);
+  const asg = sch?.assignments?.find((a) => a.id === assignmentId);
+  const pastoral = asg ? dataService.getPastoralById(asg.pastoralId || sch.pastoralId) : null;
+  const role = asg ? dataService.getRoleById(asg.roleId) : null;
+  const userMap = Object.fromEntries(dataService.getUsers().map((u) => [u.id, u]));
+  const memberName = asg ? resolveAssignedMemberName(userMap, asg.userId, asg.memberId) : '';
+
   openModal({
     title: 'Solicitar Substituição',
     bodyHtml: `
       <form id="md-sub-form" class="space-y-4">
+        ${
+          sch && asg
+            ? `
+          <div class="rounded-xl bg-[#FAF6F0] border border-[#E6DACE] p-3 space-y-1.5 text-xs text-[#4E342E]">
+            <div class="flex items-center gap-2 flex-wrap">
+              ${renderPastoralPill(pastoral, { compact: true })}
+              <span class="font-extrabold text-[#3E2723]">${escapeHtml(role?.name || 'Função')}</span>
+              ${memberName ? `<span class="text-[#8D6E63]">•</span><span class="font-bold text-[#78350F]">${escapeHtml(memberName)}</span>` : ''}
+            </div>
+            <p class="text-[#6D4C41]">
+              ${escapeHtml(formatDateBR(sch.date))} às ${escapeHtml(sch.time)} • ${escapeHtml(sch.celebrationType)} (${escapeHtml(sch.location)})
+            </p>
+          </div>
+        `
+            : ''
+        }
         <p class="text-sm text-[#5D4037]">
-          Informe o motivo da indisponibilidade. Todos os colegas e coordenadores da sua pastoral serão notificados para que alguém possa assumir esta escala.
+          Informe o motivo da indisponibilidade. Todos os colegas e coordenadores da pastoral <strong>${escapeHtml(pastoral?.shortName || 'vinculada')}</strong> serão notificados para que alguém possa assumir esta função.
         </p>
         <div>
           <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1.5">Motivo da Substituição *</label>
