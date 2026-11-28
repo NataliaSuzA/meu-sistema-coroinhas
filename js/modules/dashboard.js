@@ -8,17 +8,19 @@
  */
 
 import { dataService } from '../services/dataService.js';
-import { openAcceptSubstitutionModal } from './schedules.js';
+import { openAcceptSubstitutionModal, openClaimVacancyModal } from './schedules.js';
 import {
   buildUserTimeSlotIndex,
   canManagePastoral,
   escapeHtml,
   formatDateBR,
   formatDateTimeBR,
+  formatVacancyBadgeText,
   formatWeekdayBR,
   getAccountMembers,
   getCoordinatedPastoralIds,
   getCountdownBadge,
+  getEligibleMembersForVacancy,
   getFirstName,
   getMemberPastoralIds,
   getNoticeDashboardStatus,
@@ -189,6 +191,77 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
     `
       : '';
 
+  const accessiblePastoralSet = new Set(accessibleIds);
+  const openOpportunities = [];
+  schedules
+    .filter((s) => s.date >= todayISO && Array.isArray(s.vagasAbertas) && s.vagasAbertas.length > 0)
+    .sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`))
+    .forEach((sch) => {
+      (sch.vagasAbertas || []).forEach((vaga) => {
+        if (Number(vaga.quantidade) <= 0) return;
+        const pid = vaga.pastoralId;
+        if (!isGeneralAdmin(user) && !accessiblePastoralSet.has(pid)) return;
+        if (dashboardPastoralFilter !== 'all' && pid !== dashboardPastoralFilter) return;
+        const eligible = getEligibleMembersForVacancy(user, sch, vaga);
+        openOpportunities.push({
+          schedule: sch,
+          vacancy: vaga,
+          pastoral: pastoralMap[pid],
+          eligible,
+        });
+      });
+    });
+
+  const openOpportunitiesHtml =
+    openOpportunities.length > 0
+      ? `
+      <section id="dashboard-open-vacancies" class="rounded-2xl bg-white border border-amber-300/90 p-4 sm:p-5 space-y-3 shadow-xs">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div class="flex items-center gap-2.5">
+            <div class="w-9 h-9 rounded-xl bg-amber-100 text-[#B45309] border border-amber-300 flex items-center justify-center shrink-0">
+              <i data-lucide="sparkles" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <h4 class="text-sm font-extrabold text-[#3E2723]">Oportunidades para Servir (${openOpportunities.length})</h4>
+              <p class="text-xs text-[#6D4C41]">Celebrações próximas com vagas em aberto na sua pastoral. Pode ajudar no altar?</p>
+            </div>
+          </div>
+          <button type="button" data-nav="schedules" class="text-xs font-bold text-[#B45309] hover:text-[#3E2723] transition">
+            Ver em Escalas →
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          ${openOpportunities
+            .slice(0, 6)
+            .map(({ schedule: sch, vacancy, pastoral, eligible }) => `
+              <div class="vacancy-row-card rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div class="space-y-1 min-w-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="vacancy-pill">${escapeHtml(formatVacancyBadgeText(vacancy, pastoralMap))}</span>
+                    ${renderPastoralPill(pastoral, { compact: true })}
+                  </div>
+                  <p class="text-xs font-bold text-[#3E2723]">
+                    ${escapeHtml(formatDateBR(sch.date))} (${escapeHtml(formatWeekdayBR(sch.date))}) às ${escapeHtml(sch.time)}
+                  </p>
+                  <p class="text-[11px] text-[#6D4C41]">${escapeHtml(sch.celebrationType)} — ${escapeHtml(sch.location)}</p>
+                </div>
+                ${
+                  eligible.length > 0
+                    ? `<button type="button" data-dash-claim-vac="${vacancy.id}" data-dash-vac-sch="${sch.id}"
+                        class="btn-volunteer-serve shrink-0 self-start sm:self-center inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-extrabold shadow-xs transition">
+                        🙋‍♂️ Me Oferecer para Servir
+                      </button>`
+                    : ''
+                }
+              </div>
+            `)
+            .join('')}
+        </div>
+      </section>
+    `
+      : '';
+
   // Avisos ativos no Dashboard (fixados dentro do prazo ou sem prazo + avisos com exibirDashboardAte válido >= hoje)
   const visibleNotices = notices.filter((n) => {
     if (!isPastoralScopedItemVisible(n.pastoralIds, user, pastorals)) return false;
@@ -293,6 +366,7 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
     <div class="space-y-6">
       ${reminderBannersHtml}
       ${openSubstitutionsBannerHtml}
+      ${openOpportunitiesHtml}
       ${birthdayBannerHtml}
 
       <!-- Cabeçalho Interno Dinâmico + Filtro de Pastoral -->
@@ -620,6 +694,15 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
   container.querySelectorAll('[data-dash-accept-sub]').forEach((btn) => {
     btn.addEventListener('click', () => {
       openAcceptSubstitutionModal(btn.dataset.dashSchId, btn.dataset.dashAcceptSub, user, () => {
+        onNotificationsChanged?.();
+        renderDashboard(container, { user, navigate, setHeaderContext, permissions, openFormDirectly, onNotificationsChanged });
+      });
+    });
+  });
+
+  container.querySelectorAll('[data-dash-claim-vac]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      openClaimVacancyModal(btn.dataset.dashVacSch, btn.dataset.dashClaimVac, user, () => {
         onNotificationsChanged?.();
         renderDashboard(container, { user, navigate, setHeaderContext, permissions, openFormDirectly, onNotificationsChanged });
       });

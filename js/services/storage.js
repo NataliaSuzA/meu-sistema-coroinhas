@@ -31,6 +31,7 @@ import {
   limit,
   onSnapshot,
   query,
+  runTransaction,
   setDoc,
   writeBatch,
 } from './firebaseConfig.js';
@@ -501,5 +502,36 @@ export const storageAdapter = {
       }
     });
     trackWrite(batch.commit());
+  },
+
+  /**
+   * Executa uma transação atômica real no Cloud Firestore (`runTransaction`) em um documento,
+   * garantindo segurança contra concorrência (ex: dois voluntários clicando na última vaga aberta).
+   */
+  async runDocTransaction(colName, docId, updaterFn) {
+    const ref = doc(db, colName, docId);
+    const result = await runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) {
+        throw new Error('Documento não encontrado no Firestore.');
+      }
+      const current = normalizeFromFirestore(colName, snap.id, snap.data());
+      const outcome = updaterFn(current);
+      if (!outcome || !outcome.ok) {
+        return outcome || { ok: false, error: 'Operação cancelada.' };
+      }
+      const clean = normalizeForFirestore(colName, outcome.data);
+      tx.set(ref, clean);
+      return { ...outcome, data: clean };
+    });
+
+    if (result?.ok && result.data) {
+      const list = cache.lists[colName] || [];
+      const idx = list.findIndex((x) => x.id === result.data.id);
+      if (idx >= 0) list[idx] = result.data;
+      else list.push(result.data);
+      cache.lists[colName] = list;
+    }
+    return result;
   },
 };

@@ -25,6 +25,7 @@ import {
   limit,
   onSnapshot,
   query,
+  runTransaction,
   setDoc,
   writeBatch,
 } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
@@ -56,6 +57,7 @@ export {
   onSnapshot,
   query,
   reauthenticateWithCredential,
+  runTransaction,
   setDoc,
   signInWithEmailAndPassword,
   signOut,

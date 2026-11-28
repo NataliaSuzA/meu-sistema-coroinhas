@@ -202,3 +202,33 @@ body {
   background-color: #16A34A;
   color: #FFFFFF;
 }
+
+/* Vagas em Aberto (Precisa-se de Voluntários) — tons âmbar/dourado da paleta */
+.vacancy-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 9999px;
+  background-color: #FEF3C7;
+  color: #78350F;
+  border: 1px solid #F59E0B;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.vacancy-row-card {
+  background: linear-gradient(90deg, rgba(254, 243, 199, 0.55) 0%, rgba(253, 251, 247, 0.95) 100%);
+  border: 1px dashed #D97706;
+}
+
+.btn-volunteer-serve {
+  background-color: #B45309;
+  color: #FFFFFF;
+  border: 1px solid #92400E;
+}
+
+.btn-volunteer-serve:hover {
+  background-color: #92400E;
+}

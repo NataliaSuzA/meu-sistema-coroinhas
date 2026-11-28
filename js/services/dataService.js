@@ -370,9 +370,29 @@ export const dataService = {
       substituidoDe: a.substituidoDe || null,
       substitutionRecordId: a.substitutionRecordId || null,
       substitutedAt: a.substitutedAt || null,
+      voluntario: Boolean(a.voluntario),
     }));
 
-    const distinctPastorals = Array.from(new Set(normalizedAssignments.map((a) => a.pastoralId).filter(Boolean)));
+    const normalizedVagas = (schedule.vagasAbertas || [])
+      .filter((v) => v && v.pastoralId && v.funcao && Number(v.quantidade) > 0)
+      .map((v) => {
+        const p = this.getPastoralById(v.pastoralId);
+        return {
+          id: v.id || genId('vaga'),
+          pastoralId: v.pastoralId,
+          pastoralNome: v.pastoralNome || p?.shortName || p?.name || 'Pastoral',
+          funcao: String(v.funcao).trim(),
+          roleId: v.roleId || '',
+          quantidade: Math.max(1, parseInt(v.quantidade, 10) || 1),
+        };
+      });
+
+    const distinctPastorals = Array.from(
+      new Set([
+        ...normalizedAssignments.map((a) => a.pastoralId).filter(Boolean),
+        ...normalizedVagas.map((v) => v.pastoralId).filter(Boolean),
+      ]),
+    );
     const derivedPastoralId = schedule.pastoralId || distinctPastorals[0] || 'pas_coroinhas';
 
     const locObj = schedule.locationId ? this.getLocationById(schedule.locationId) : null;
@@ -391,9 +411,108 @@ export const dataService = {
       celebrantScript: scriptText,
       roteiroCelebrante: scriptText,
       assignments: normalizedAssignments,
+      vagasAbertas: normalizedVagas,
     };
 
     return storageAdapter.upsertDoc(COLLECTIONS.SCHEDULES, enriched);
+  },
+
+  /**
+   * Candidatura rápida em vaga aberta usando transação atômica real no Cloud Firestore (`runTransaction`):
+   * adiciona o voluntário à escala (`voluntario: true`) e decrementa/remove a vaga em aberto.
+   */
+  async claimOpenVacancy(scheduleId, vacancyId, { userId, memberId }) {
+    const users = this.getUsers();
+    const roles = this.getRoles();
+    const resolvedMemberId = memberId || userId;
+    const memberName = resolveMemberNameFromList(users, userId, resolvedMemberId);
+
+    const norm = (s) =>
+      String(s || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim();
+
+    try {
+      const txResult = await storageAdapter.runDocTransaction(
+        COLLECTIONS.SCHEDULES,
+        scheduleId,
+        (currentSch) => {
+          const vagas = Array.isArray(currentSch.vagasAbertas)
+            ? currentSch.vagasAbertas.map((v) => ({ ...v }))
+            : [];
+          const targetIdx = vagas.findIndex((v) => v.id === vacancyId);
+          if (targetIdx < 0 || Number(vagas[targetIdx].quantidade) <= 0) {
+            return { ok: false, error: 'Esta vaga já foi preenchida por outro voluntário.' };
+          }
+
+          const targetVaga = vagas[targetIdx];
+          const assignments = Array.isArray(currentSch.assignments)
+            ? currentSch.assignments.map((a) => ({ ...a }))
+            : [];
+
+          const alreadyInMass = assignments.some(
+            (a) => (a.memberId || a.userId) === resolvedMemberId,
+          );
+          if (alreadyInMass) {
+            return { ok: false, error: `${memberName} já está escalado(a) nesta celebração.` };
+          }
+
+          // Resolve o roleId correspondente na pastoral
+          const pastoralRoles = roles.filter((r) => r.pastoralId === targetVaga.pastoralId);
+          const matchedRole =
+            (targetVaga.roleId && pastoralRoles.find((r) => r.id === targetVaga.roleId)) ||
+            pastoralRoles.find((r) => norm(r.name) === norm(targetVaga.funcao)) ||
+            pastoralRoles.find((r) => norm(r.name).includes(norm(targetVaga.funcao))) ||
+            pastoralRoles.find((r) => norm(r.name).includes('altar')) ||
+            pastoralRoles[0];
+
+          const newAssignment = {
+            id: genId('asg'),
+            pastoralId: targetVaga.pastoralId,
+            roleId: matchedRole?.id || targetVaga.roleId || '',
+            userId,
+            memberId: resolvedMemberId,
+            substitutionRequested: false,
+            substitutionReason: '',
+            substitutionAccepted: false,
+            substitutedFromName: '',
+            substituidoDe: null,
+            substitutionRecordId: null,
+            substitutedAt: null,
+            voluntario: true,
+          };
+
+          assignments.push(newAssignment);
+
+          const remainingQty = Number(targetVaga.quantidade) - 1;
+          if (remainingQty <= 0) {
+            vagas.splice(targetIdx, 1);
+          } else {
+            vagas[targetIdx] = { ...targetVaga, quantidade: remainingQty };
+          }
+
+          return {
+            ok: true,
+            data: {
+              ...currentSch,
+              assignments,
+              vagasAbertas: vagas,
+            },
+            claimedVaga: targetVaga,
+            memberName,
+          };
+        },
+      );
+
+      return txResult;
+    } catch (err) {
+      return {
+        ok: false,
+        error: err?.message || 'Não foi possível confirmar a vaga. Tente novamente.',
+      };
+    }
   },
 
   deleteSchedule(id) {

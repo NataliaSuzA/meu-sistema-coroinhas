@@ -23,10 +23,12 @@ import {
   findConflictsForMember,
   formatDateBR,
   formatDateTimeBR,
+  formatVacancyBadgeText,
   formatWeekdayBR,
   getAccountMembers,
   getCoordinatedPastoralIds,
   getCountdownBadge,
+  getEligibleMembersForVacancy,
   getFirstName,
   getLinkedSiblingsInfo,
   getMemberPastoralIds,
@@ -48,6 +50,7 @@ let activeTab = 'my_dates';
 let selectedCoordinatorFilter = 'all';
 let subControlPeriodFilter = 'all';
 let subControlPastoralFilter = 'all';
+let onlyOpenVacanciesFilter = false;
 
 function isCoordinatorRole(roleId, roleMap = {}) {
   if (!roleId) return false;
@@ -69,6 +72,21 @@ function getStrictPastoralAssignments(sch, pastoralId, { isCoordOrAdmin, roleMap
   });
 }
 
+function getStrictPastoralVacancies(sch, pastoralId) {
+  return (sch.vagasAbertas || []).filter(
+    (v) => v && v.pastoralId === pastoralId && Number(v.quantidade) > 0,
+  );
+}
+
+function getVisibleVacanciesForTab(sch, { activeTab, isSpecificPastoralTab, isCoordOrAdmin, accessiblePastoralSet }) {
+  const allOpen = (sch.vagasAbertas || []).filter((v) => v && Number(v.quantidade) > 0);
+  if (isSpecificPastoralTab) {
+    return allOpen.filter((v) => v.pastoralId === activeTab);
+  }
+  if (isCoordOrAdmin) return allOpen;
+  return allOpen.filter((v) => accessiblePastoralSet.has(v.pastoralId));
+}
+
 function formatCoordinatorTitle(fullName) {
   const first = getFirstName(fullName).toLowerCase();
   return first.endsWith('a') ? 'Coordenadora' : 'Coordenador';
@@ -79,6 +97,7 @@ export function resetSchedulesTab() {
   selectedCoordinatorFilter = 'all';
   subControlPeriodFilter = 'all';
   subControlPastoralFilter = 'all';
+  onlyOpenVacanciesFilter = false;
 }
 
 export function setSchedulesTab(tabId) {
@@ -195,7 +214,7 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
     activeTab !== 'coordinators' &&
     activeTab !== 'substitutions';
 
-  const filtered = schedules.filter((sch) => {
+  const filteredByTab = schedules.filter((sch) => {
     if (activeTab === 'all_managed') return true;
     if (activeTab === 'coordinators') {
       if (!isCoordOrAdmin) return false;
@@ -205,11 +224,37 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
       return coordAsgs.some((a) => a.userId === selectedCoordinatorFilter);
     }
     if (isSpecificPastoralTab) {
-      // Nível 1: exibe APENAS celebrações que possuem pelo menos 1 posição escalada nesta pastoral
-      return getStrictPastoralAssignments(sch, activeTab, { isCoordOrAdmin, roleMap }).length > 0;
+      // Nível 1: exibe celebrações com pelo menos 1 posição escalada OU 1 vaga aberta nesta pastoral
+      return (
+        getStrictPastoralAssignments(sch, activeTab, { isCoordOrAdmin, roleMap }).length > 0 ||
+        getStrictPastoralVacancies(sch, activeTab).length > 0
+      );
     }
     return false;
   });
+
+  const openVacanciesInTabCount = filteredByTab.filter(
+    (sch) =>
+      getVisibleVacanciesForTab(sch, {
+        activeTab,
+        isSpecificPastoralTab,
+        isCoordOrAdmin,
+        accessiblePastoralSet,
+      }).length > 0,
+  ).length;
+
+  const filtered =
+    onlyOpenVacanciesFilter && activeTab !== 'my_dates' && activeTab !== 'substitutions'
+      ? filteredByTab.filter(
+          (sch) =>
+            getVisibleVacanciesForTab(sch, {
+              activeTab,
+              isSpecificPastoralTab,
+              isCoordOrAdmin,
+              accessiblePastoralSet,
+            }).length > 0,
+        )
+      : filteredByTab;
 
   // Pedidos de substituição abertos feitos por colegas das pastorais do usuário
   const openSubstitutions = getOpenSubstitutionsForUser(user, schedules, pastorals);
@@ -239,8 +284,8 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
           <div class="flex items-center gap-2 flex-wrap shrink-0">
             <button id="btn-import-whatsapp" type="button"
               class="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-white hover:bg-amber-50 text-[#3E2723] border border-[#D7C4B2] hover:border-[#B45309] text-sm font-semibold shadow-xs transition">
-              <i data-lucide="message-square-text" class="w-4 h-4 text-[#B45309]"></i>
-              Importar Escala (Texto WhatsApp)
+              <i data-lucide="file-spreadsheet" class="w-4 h-4 text-[#B45309]"></i>
+              Importar Escala (WhatsApp / CSV)
             </button>
             <button id="btn-new-schedule" type="button"
               class="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#3E2723] hover:bg-[#5D4037] text-white text-sm font-semibold shadow-sm transition">
@@ -324,7 +369,8 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
                       ? scopedSubstitutions.length
                       : schedules.filter(
                           (s) =>
-                            getStrictPastoralAssignments(s, t.id, { isCoordOrAdmin, roleMap }).length > 0,
+                            getStrictPastoralAssignments(s, t.id, { isCoordOrAdmin, roleMap }).length > 0 ||
+                            getStrictPastoralVacancies(s, t.id).length > 0,
                         ).length;
 
             return `
@@ -362,6 +408,23 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
             `;
           })
           .join('')}
+        ${
+          activeTab !== 'my_dates' && activeTab !== 'substitutions'
+            ? `
+          <button id="btn-filter-open-vacancies" type="button"
+            class="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap border transition ${
+              onlyOpenVacanciesFilter
+                ? 'bg-[#D97706] text-white border-[#B45309] shadow-sm'
+                : 'bg-amber-50 text-[#78350F] border-amber-300 hover:bg-amber-100'
+            }">
+            <span>🟡 Com Vagas Abertas</span>
+            <span class="px-1.5 py-0.5 rounded-md text-[11px] font-extrabold ${
+              onlyOpenVacanciesFilter ? 'bg-white/25 text-white' : 'bg-amber-200/80 text-[#78350F]'
+            }">${openVacanciesInTabCount}</span>
+          </button>
+        `
+            : ''
+        }
       </div>
 
       <!-- Filtro rápido por Coordenador Responsável (apenas na aba Coordenadores para Coordenação) -->
@@ -459,8 +522,16 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
   container.querySelectorAll('[data-tab]').forEach((btn) => {
     btn.addEventListener('click', () => {
       activeTab = btn.dataset.tab;
+      if (activeTab === 'my_dates' || activeTab === 'substitutions') {
+        onlyOpenVacanciesFilter = false;
+      }
       renderSchedules(container, { user, setHeaderContext, permissions, openLiturgyFor, onNotificationsChanged });
     });
+  });
+
+  container.querySelector('#btn-filter-open-vacancies')?.addEventListener('click', () => {
+    onlyOpenVacanciesFilter = !onlyOpenVacanciesFilter;
+    renderSchedules(container, { user, setHeaderContext, permissions, openLiturgyFor, onNotificationsChanged });
   });
 
   container.querySelectorAll('[data-coord-filter]').forEach((btn) => {
@@ -530,6 +601,12 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
   tabBody.querySelectorAll('[data-reassign]').forEach((btn) => {
     btn.addEventListener('click', () => {
       openReassignModal(btn.dataset.scheduleId, btn.dataset.reassign, user, rerender);
+    });
+  });
+
+  tabBody.querySelectorAll('[data-claim-vacancy]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      openClaimVacancyModal(btn.dataset.scheduleId, btn.dataset.claimVacancy, user, rerender);
     });
   });
 
@@ -813,6 +890,7 @@ function renderScheduleCard(sch, { user, activeTab = '', isSpecificPastoralTab =
                         ${escapeHtml(assignedName)}
                         ${isMine ? '<span class="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-200 text-[#78350F]">Você</span>' : ''}
                         ${isFamAcc ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100/80 text-[#78350F] border border-amber-300">Conta Familiar</span>' : ''}
+                        ${isCoordOrAdmin && asg.voluntario ? '<span class="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">🙋 Voluntário</span>' : ''}
                       </p>
                       ${
                         linkedSiblings.length > 0
@@ -911,6 +989,40 @@ function renderScheduleCard(sch, { user, activeTab = '', isSpecificPastoralTab =
               `;
             })
             .join('')}
+          ${(() => {
+            const visibleVacancies = getVisibleVacanciesForTab(sch, {
+              activeTab,
+              isSpecificPastoralTab,
+              isCoordOrAdmin,
+              accessiblePastoralSet,
+            });
+            if (visibleVacancies.length === 0) return '';
+            return `
+              <div class="pt-2 space-y-2" data-open-vacancies-box="${sch.id}">
+                <p class="text-[11px] font-extrabold uppercase tracking-wider text-[#92400E]">Vagas em Aberto</p>
+                ${visibleVacancies
+                  .map((v) => {
+                    const eligible = !isPast ? getEligibleMembersForVacancy(user, sch, v) : [];
+                    return `
+                      <div class="vacancy-row-card rounded-xl px-3 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div class="flex items-center gap-2 flex-wrap">
+                          <span class="vacancy-pill">${escapeHtml(formatVacancyBadgeText(v, pastoralMap))}</span>
+                        </div>
+                        ${
+                          eligible.length > 0
+                            ? `<button type="button" data-claim-vacancy="${escapeHtml(v.id)}" data-schedule-id="${sch.id}"
+                                class="btn-volunteer-serve shrink-0 self-start sm:self-center inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-extrabold shadow-xs transition">
+                                🙋‍♂️ Me Oferecer para Servir
+                              </button>`
+                            : ''
+                        }
+                      </div>
+                    `;
+                  })
+                  .join('')}
+              </div>
+            `;
+          })()}
         </div>
       </div>
 
@@ -1021,6 +1133,97 @@ export function openAcceptSubstitutionModal(scheduleId, assignmentId, user, onDo
             `Substituição confirmada! ${result.newMemberName} assumiu ${role?.name || 'a função'} no lugar de ${getFirstName(result.prevMemberName)}.`,
           );
         }
+        onDone?.();
+      });
+    },
+  });
+}
+
+/**
+ * Modal de Confirmação Rápida para Candidatura em Vaga Aberta ("🙋‍♂️ Me Oferecer para Servir")
+ * Exportado para uso tanto na tela de Escalas quanto no widget "Oportunidades para Servir" do Início (Dashboard).
+ */
+export function openClaimVacancyModal(scheduleId, vacancyId, user, onDone) {
+  const sch = dataService.getScheduleById(scheduleId);
+  if (!sch) return;
+  const vacancy = (sch.vagasAbertas || []).find((v) => v.id === vacancyId && Number(v.quantidade) > 0);
+  if (!vacancy) {
+    showToast('Esta vaga já foi preenchida!', 'info');
+    onDone?.();
+    return;
+  }
+
+  const eligible = getEligibleMembersForVacancy(user, sch, vacancy);
+  if (eligible.length === 0) {
+    showToast('Você (ou sua família) já está escalado nesta celebração ou não pertence a esta pastoral.', 'info');
+    return;
+  }
+
+  const pastoral = dataService.getPastoralById(vacancy.pastoralId);
+  const pastoralMap = Object.fromEntries(dataService.getPastorals().map((p) => [p.id, p]));
+
+  openModal({
+    title: 'Confirmar Voluntariado na Escala',
+    maxWidth: 'max-w-lg',
+    bodyHtml: `
+      <form id="claim-vacancy-form" class="space-y-4">
+        <div class="rounded-2xl bg-amber-50/90 border border-amber-300 p-4 space-y-2 text-sm text-[#3E2723]">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="vacancy-pill">${escapeHtml(formatVacancyBadgeText(vacancy, pastoralMap))}</span>
+            ${renderPastoralPill(pastoral, { compact: true })}
+          </div>
+          <p class="leading-relaxed">
+            Deseja confirmar presença como voluntário(a) na função de <strong class="text-[#B45309]">${escapeHtml(vacancy.funcao)}</strong>
+            na celebração de <strong>${escapeHtml(formatDateBR(sch.date))} (${escapeHtml(formatWeekdayBR(sch.date))}) às ${escapeHtml(sch.time)}</strong>
+            (${escapeHtml(sch.location)})?
+          </p>
+        </div>
+
+        ${
+          eligible.length > 1
+            ? `
+          <div>
+            <label for="volunteer-member-select" class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">
+              Qual integrante da Conta Familiar vai assumir esta vaga? *
+            </label>
+            <select id="volunteer-member-select" name="memberId" required
+              class="w-full px-3.5 py-2.5 rounded-xl border border-[#E6DACE] bg-white text-sm font-semibold text-[#3E2723] outline-none focus:border-[#B45309]">
+              ${eligible.map((m) => `<option value="${escapeHtml(m.memberId)}">${escapeHtml(m.name)}</option>`).join('')}
+            </select>
+          </div>
+        `
+            : `<p class="text-xs text-[#5D4037] bg-[#FAF6F0] border border-[#E6DACE] rounded-xl px-3.5 py-2.5">
+                Integrante que será escalado(a): <strong class="text-[#3E2723]">${escapeHtml(eligible[0].name)}</strong>
+              </p>`
+        }
+
+        <div class="flex justify-end gap-2 pt-2 border-t border-[#E6DACE]/80">
+          <button type="button" id="cancel-claim-vac" class="px-4 py-2 rounded-xl border border-[#E6DACE] text-sm font-semibold text-[#5D4037] hover:bg-[#FAF6F0]">Cancelar</button>
+          <button type="submit" id="confirm-claim-vac" class="btn-volunteer-serve inline-flex items-center gap-1.5 px-5 py-2 rounded-xl text-sm font-extrabold shadow-xs transition">
+            🙋‍♂️ Confirmar e Servir
+          </button>
+        </div>
+      </form>
+    `,
+    onMount(bodyEl) {
+      bodyEl.querySelector('#cancel-claim-vac').addEventListener('click', closeModal);
+      bodyEl.querySelector('#claim-vacancy-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const submitBtn = bodyEl.querySelector('#confirm-claim-vac');
+        if (submitBtn) submitBtn.disabled = true;
+        const fd = new FormData(e.target);
+        const chosenMemberId = eligible.length > 1 ? String(fd.get('memberId')) : eligible[0].memberId;
+        const res = await dataService.claimOpenVacancy(scheduleId, vacancyId, {
+          userId: user.id,
+          memberId: chosenMemberId,
+        });
+        if (!res?.ok) {
+          if (submitBtn) submitBtn.disabled = false;
+          showToast(res?.error || 'Não foi possível confirmar esta vaga.', 'error');
+          return;
+        }
+        closeModal();
+        showToast('✅ Presença confirmada na escala!');
         onDone?.();
       });
     },
@@ -1157,6 +1360,22 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
           <div id="positions-list" class="space-y-2.5"></div>
         </div>
 
+        <!-- Vagas em Aberto (Precisa-se de Voluntários) -->
+        <div class="pt-3 border-t border-[#E6DACE]/80 space-y-2.5">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div>
+              <label class="text-xs font-bold uppercase tracking-wider text-[#92400E]">Vagas em Aberto (Precisa-se de Voluntários)</label>
+              <p class="text-[11px] text-[#6D4C41]">Registre posições descobertas para que membros da pastoral possam se oferecer pelo app.</p>
+            </div>
+            <button id="btn-add-vacancy-row" type="button"
+              class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-100 hover:bg-amber-200 text-[#78350F] border border-amber-400 transition">
+              <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
+              + Adicionar Vaga em Aberto
+            </button>
+          </div>
+          <div id="vacancies-list" class="space-y-2"></div>
+        </div>
+
         <div>
           <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Observações da Equipe</label>
           <textarea name="notes" rows="2" class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm focus:border-[#B45309] outline-none">${escapeHtml(existing?.notes || '')}</textarea>
@@ -1170,6 +1389,7 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
     `,
     onMount(bodyEl) {
       const listEl = bodyEl.querySelector('#positions-list');
+      const vacanciesListEl = bodyEl.querySelector('#vacancies-list');
       const dateInput = bodyEl.querySelector('#sch-date-input');
       const timeInput = bodyEl.querySelector('#sch-time-input');
       const locationSelect = bodyEl.querySelector('#sch-location-select');
@@ -1683,6 +1903,7 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
         row.dataset.subFromNome = preset?.substituidoDe?.nome || '';
         row.dataset.subRecId = preset?.substitutionRecordId || '';
         row.dataset.subAt = preset?.substitutedAt || '';
+        row.dataset.voluntario = preset?.voluntario ? '1' : '0';
 
         row.innerHTML = `
           <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
@@ -1730,11 +1951,96 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
         refreshSiblingReconciliation();
       }
 
+      const STANDARD_VACANCY_ROLES = ['Altar', 'Missal', 'Credência', 'Turíbulo', 'Naveta', 'Tocha'];
+
+      function buildVacancyRoleOptions(pastoralId, selectedFunc = '') {
+        const activeRoles = dataService
+          .getActiveRolesByPastoral(pastoralId)
+          .filter((r) => !isCoordinatorRole(r.id, roleMap));
+        const namesSeen = new Set();
+        const opts = [];
+        activeRoles.forEach((r) => {
+          namesSeen.add(r.name.toLowerCase());
+          opts.push({ label: r.name, roleId: r.id });
+        });
+        STANDARD_VACANCY_ROLES.forEach((std) => {
+          if (!namesSeen.has(std.toLowerCase())) {
+            opts.push({ label: std, roleId: '' });
+          }
+        });
+        return opts
+          .map(
+            (o) =>
+              `<option value="${escapeHtml(o.label)}" data-role-id="${escapeHtml(o.roleId)}" ${
+                selectedFunc && o.label.toLowerCase() === selectedFunc.toLowerCase() ? 'selected' : ''
+              }>${escapeHtml(o.label)}</option>`,
+          )
+          .join('');
+      }
+
+      function addVacancyRow(preset = null) {
+        const vPastoralId =
+          preset?.pastoralId && managedIds.has(preset.pastoralId)
+            ? preset.pastoralId
+            : managedIds.has(defaultPastoralId)
+              ? defaultPastoralId
+              : managedPastorals[0].id;
+        const defaultFunc =
+          preset?.funcao || (pastoralMap[vPastoralId]?.shortName?.toLowerCase().includes('acól') ? 'Credência' : 'Altar');
+
+        const vRow = document.createElement('div');
+        vRow.className = 'vacancy-row vacancy-row-card p-2.5 rounded-xl grid grid-cols-1 sm:grid-cols-12 gap-2 items-center';
+        vRow.dataset.vid = preset?.id || '';
+        vRow.innerHTML = `
+          <div class="sm:col-span-4">
+            <select class="vac-pastoral w-full px-2.5 py-2 rounded-lg border border-amber-300 bg-white text-xs font-semibold text-[#3E2723] outline-none focus:border-[#B45309]">
+              ${managedPastorals.map((p) => `<option value="${p.id}" ${vPastoralId === p.id ? 'selected' : ''}>${escapeHtml(p.shortName)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="sm:col-span-4">
+            <select class="vac-role w-full px-2.5 py-2 rounded-lg border border-amber-300 bg-white text-xs font-medium text-[#3E2723] outline-none focus:border-[#B45309]">
+              ${buildVacancyRoleOptions(vPastoralId, defaultFunc)}
+            </select>
+          </div>
+          <div class="sm:col-span-3 flex items-center gap-1.5">
+            <span class="text-[11px] font-bold text-[#78350F] shrink-0">Qtd:</span>
+            <input type="number" min="1" max="10" value="${Math.max(1, parseInt(preset?.quantidade, 10) || 1)}"
+              class="vac-qty w-full px-2.5 py-2 rounded-lg border border-amber-300 bg-white text-xs font-extrabold text-[#3E2723] outline-none focus:border-[#B45309]">
+          </div>
+          <div class="sm:col-span-1 flex justify-end">
+            <button type="button" class="remove-vac-btn p-1.5 rounded-lg text-[#8D6E63] hover:text-red-700 hover:bg-red-50 transition" title="Remover vaga">
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+            </button>
+          </div>
+        `;
+
+        const vacPastoralSel = vRow.querySelector('.vac-pastoral');
+        const vacRoleSel = vRow.querySelector('.vac-role');
+        vacPastoralSel.addEventListener('change', () => {
+          const fallback = pastoralMap[vacPastoralSel.value]?.shortName?.toLowerCase().includes('acól')
+            ? 'Credência'
+            : 'Altar';
+          vacRoleSel.innerHTML = buildVacancyRoleOptions(vacPastoralSel.value, fallback);
+        });
+        vRow.querySelector('.remove-vac-btn').addEventListener('click', () => vRow.remove());
+
+        vacanciesListEl.appendChild(vRow);
+        refreshIcons();
+      }
+
       if (existing?.assignments?.length) {
         existing.assignments.filter((a) => managedIds.has(a.pastoralId || existing.pastoralId)).forEach((a) => addPositionRow(a));
-      } else {
+      } else if (!existing?.vagasAbertas?.length) {
         addPositionRow();
       }
+
+      if (existing?.vagasAbertas?.length) {
+        existing.vagasAbertas
+          .filter((v) => managedIds.has(v.pastoralId))
+          .forEach((v) => addVacancyRow(v));
+      }
+
+      bodyEl.querySelector('#btn-add-vacancy-row')?.addEventListener('click', () => addVacancyRow());
 
       dateInput.addEventListener('change', () => {
         syncLiturgyForDate(dateInput.value, true);
@@ -1783,14 +2089,36 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
                 : null,
               substitutionRecordId: row.dataset.subRecId || null,
               substitutedAt: row.dataset.subAt || null,
+              voluntario: row.dataset.voluntario === '1',
+            });
+          }
+        });
+
+        const editedVagas = [];
+        vacanciesListEl.querySelectorAll('.vacancy-row').forEach((vRow) => {
+          const vPid = vRow.querySelector('.vac-pastoral')?.value;
+          const vRoleSel = vRow.querySelector('.vac-role');
+          const vFuncao = vRoleSel?.value?.trim();
+          const vRoleId = vRoleSel?.selectedOptions?.[0]?.dataset?.roleId || '';
+          const vQty = Math.max(1, parseInt(vRow.querySelector('.vac-qty')?.value, 10) || 1);
+          if (vPid && vFuncao && vQty > 0) {
+            editedVagas.push({
+              id: vRow.dataset.vid || undefined,
+              pastoralId: vPid,
+              pastoralNome: pastoralMap[vPid]?.shortName || pastoralMap[vPid]?.name || 'Pastoral',
+              funcao: vFuncao,
+              roleId: vRoleId,
+              quantidade: vQty,
             });
           }
         });
 
         const preserved = (existing?.assignments || []).filter((a) => !managedIds.has(a.pastoralId || existing.pastoralId));
+        const preservedVagas = (existing?.vagasAbertas || []).filter((v) => !managedIds.has(v.pastoralId));
         const finalAssignments = [...preserved, ...edited];
-        if (finalAssignments.length === 0) {
-          showToast('Adicione pelo menos uma posição.', 'error');
+        const finalVagas = [...preservedVagas, ...editedVagas];
+        if (finalAssignments.length === 0 && finalVagas.length === 0) {
+          showToast('Adicione pelo menos uma posição ou uma vaga em aberto.', 'error');
           return;
         }
 
@@ -1800,12 +2128,17 @@ function openScheduleModal(existing, { user, defaultPastoralId }, onSaved) {
           time: fd.get('time'),
           locationId: fd.get('locationId'),
           celebrationTypeId: fd.get('celebrationTypeId'),
-          pastoralId: existing?.pastoralId || finalAssignments[0].pastoralId,
+          pastoralId:
+            existing?.pastoralId ||
+            finalAssignments[0]?.pastoralId ||
+            finalVagas[0]?.pastoralId ||
+            managedPastorals[0].id,
           eucharisticPrayerId: fd.get('eucharisticPrayerId'),
           eucharisticPrayerSource: oeSource,
           celebrantScript: String(fd.get('celebrantScript') || '').trim(),
           notes: String(fd.get('notes') || '').trim(),
           assignments: finalAssignments,
+          vagasAbertas: finalVagas,
         });
 
         closeModal();
@@ -1964,7 +2297,21 @@ function findParticipantByName(rawToken, pastoralId, participantsByPastoral, all
   return found ? { ...found, roleHint } : null;
 }
 
-function parseWhatsAppScheduleText(rawText, { defaultYear, defaultPastoralId, pastorals, locations, celebrationTypes, roles, users }) {
+function parseWhatsAppScheduleText(
+  rawText,
+  {
+    defaultYear,
+    defaultPastoralId,
+    pastorals,
+    locations,
+    celebrationTypes,
+    roles,
+    users,
+    skipSunday7Cor = true,
+    minCoroinhas = 0,
+    minAcolitos = 0,
+  },
+) {
   const activePastorals = pastorals.filter((p) => p.active);
   const coroinhasP = activePastorals.find((p) => normText(p.shortName) === 'coroinhas') || activePastorals[0];
   const acolitosP = activePastorals.find((p) => normText(p.shortName) === 'acolitos') || activePastorals[1] || activePastorals[0];
@@ -1988,12 +2335,19 @@ function parseWhatsAppScheduleText(rawText, { defaultYear, defaultPastoralId, pa
         const tur = pRoles.find((r) => normText(r.name).includes('turif') || normText(r.name).includes('turib'));
         if (tur) return tur;
       }
+      if (hn.includes('toch') || hn.includes('vela')) {
+        const vela = pRoles.find((r) => normText(r.name).includes('toch') || normText(r.name).includes('vela'));
+        if (vela) return vela;
+      }
     }
     return pRoles.find((r) => normText(r.name).includes('altar')) || pRoles[0];
   };
 
   const detectLocation = (line) => {
     const ln = normText(line);
+    if (ln.includes('maria goretti') || ln.includes('goretti')) {
+      return locations.find((l) => normText(l.name).includes('goretti')) || defaultLoc;
+    }
     if (ln.includes('sao francisco') || ln.includes('francisco')) {
       return locations.find((l) => normText(l.name).includes('francisco')) || defaultLoc;
     }
@@ -2012,14 +2366,64 @@ function parseWhatsAppScheduleText(rawText, { defaultYear, defaultPastoralId, pa
     if (cn.includes('novena')) return celebrationTypes.find((c) => normText(c.name).includes('novena')) || celebrationTypes[0];
     if (cn.includes('sav')) return celebrationTypes.find((c) => normText(c.name).includes('sav')) || celebrationTypes[0];
     const [y, m, d] = isoDate.split('-').map(Number);
-    const dow = new Date(y, m - 1, d).getDay(); // 0=Dom, 6=Sáb
+    const dow = new Date(y, m - 1, d).getDay();
     if (dow === 0 || dow === 6) {
       return celebrationTypes.find((c) => normText(c.name).includes('dominical')) || celebrationTypes[0];
     }
     return celebrationTypes.find((c) => normText(c.name).includes('semanal')) || celebrationTypes[0];
   };
 
-  const lines = String(rawText || '')
+  const isSunday7AM = (isoDate, time) => {
+    if (!isoDate || time !== '07:00') return false;
+    const [y, m, d] = isoDate.split('-').map(Number);
+    return new Date(y, m - 1, d).getDay() === 0;
+  };
+
+  const isAbsenceToken = (rawStr) => {
+    const t = normText(rawStr);
+    if (!t) return true;
+    return (
+      /\bvaga\b/.test(t) ||
+      /\bfalta\b/.test(t) ||
+      t.includes('sem escala') ||
+      t.includes('sem disponibilidade') ||
+      t.includes('ninguem') ||
+      t.includes('nenhum') ||
+      t === '-' ||
+      t === '—'
+    );
+  };
+
+  const addVacancyToEntry = (entry, pastoralObj, funcao, quantidade = 1) => {
+    if (!entry || !pastoralObj || quantidade <= 0) return;
+    if (
+      skipSunday7Cor &&
+      coroinhasP &&
+      pastoralObj.id === coroinhasP.id &&
+      isSunday7AM(entry.date, entry.time)
+    ) {
+      return;
+    }
+    const existingVac = entry.vagasAbertas.find(
+      (v) => v.pastoralId === pastoralObj.id && normText(v.funcao) === normText(funcao),
+    );
+    if (existingVac) {
+      existingVac.quantidade += quantidade;
+    } else {
+      const roleObj = findRoleFor(pastoralObj.id, funcao, false);
+      entry.vagasAbertas.push({
+        id: `imp_vaga_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+        pastoralId: pastoralObj.id,
+        pastoralNome: pastoralObj.shortName || pastoralObj.name,
+        funcao,
+        roleId: roleObj?.id || '',
+        quantidade,
+      });
+    }
+  };
+
+  // Detecta se o conteúdo é CSV tabular (ex: Data;Horário;Local;Coroinhas;Acólitos)
+  const rawLines = String(rawText || '')
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
@@ -2028,24 +2432,27 @@ function parseWhatsAppScheduleText(rawText, { defaultYear, defaultPastoralId, pa
   let currentDate = null;
   let currentDayHint = '';
   let currentEntry = null;
+  let sawDecember = false;
 
-  const ensureEntry = (time, locObj, contextText) => {
-    if (!currentDate) return null;
+  const ensureEntry = (dateIso, time, locObj, contextText) => {
+    if (!dateIso) return null;
     const loc = locObj || defaultLoc;
-    const ct = detectCelebrationType(`${currentDayHint} ${contextText}`, currentDate);
-    // Reaproveita entrada já aberta para a mesma Data + Horário + Local
-    let existing = entries.find((e) => e.date === currentDate && e.time === time && e.locationId === loc.id);
+    const ct = detectCelebrationType(`${currentDayHint} ${contextText}`, dateIso);
+    let existing = entries.find((e) => e.date === dateIso && e.time === time && e.locationId === loc.id);
     if (!existing) {
       existing = {
-        date: currentDate,
+        date: dateIso,
         time,
         locationId: loc.id,
         location: loc.name,
         celebrationTypeId: ct.id,
         celebrationType: ct.name,
         assignments: [],
+        vagasAbertas: [],
         notes: [],
         unmatched: [],
+        touchedCoroinhas: false,
+        touchedAcolitos: false,
       };
       entries.push(existing);
     }
@@ -2055,12 +2462,46 @@ function parseWhatsAppScheduleText(rawText, { defaultYear, defaultPastoralId, pa
 
   const addNamesToEntry = (entry, rawNames, pastoralId, isCoord = false) => {
     if (!entry) return;
-    rawNames
+    const pastoralObj = activePastorals.find((p) => p.id === pastoralId);
+    if (coroinhasP && pastoralId === coroinhasP.id) entry.touchedCoroinhas = true;
+    if (acolitosP && pastoralId === acolitosP.id) entry.touchedAcolitos = true;
+
+    const cleanRaw = String(rawNames || '').trim();
+    if (!isCoord && isAbsenceToken(cleanRaw)) {
+      if (coroinhasP && pastoralId === coroinhasP.id) {
+        addVacancyToEntry(entry, coroinhasP, 'Altar', 2);
+      } else if (acolitosP && pastoralId === acolitosP.id) {
+        addVacancyToEntry(entry, acolitosP, 'Credência', 1);
+      }
+      return;
+    }
+
+    cleanRaw
       .split(/[,;|]+/)
       .map((s) => s.trim())
       .filter(Boolean)
       .forEach((tok) => {
-        const hit = findParticipantByName(tok, isCoord ? null : pastoralId, participantsByPastoral, users);
+        if (!isCoord && isAbsenceToken(tok)) {
+          if (coroinhasP && pastoralId === coroinhasP.id) {
+            addVacancyToEntry(entry, coroinhasP, 'Altar', 1);
+          } else if (acolitosP && pastoralId === acolitosP.id) {
+            addVacancyToEntry(entry, acolitosP, 'Credência', 1);
+          }
+          return;
+        }
+
+        // Acúmulo de função nos Acólitos: "Nome (Missal / Credência)" -> escala em Missal + abre 1 vaga de Credência
+        const isDualMissalCredencia =
+          !isCoord &&
+          acolitosP &&
+          pastoralId === acolitosP.id &&
+          /\(\s*missal\s*[\/+&]\s*cred[eê]ncia\s*\)/i.test(tok);
+
+        const normalizedTok = isDualMissalCredencia
+          ? tok.replace(/\(\s*missal\s*[\/+&]\s*cred[eê]ncia\s*\)/i, '(Missal)')
+          : tok;
+
+        const hit = findParticipantByName(normalizedTok, isCoord ? null : pastoralId, participantsByPastoral, users);
         if (!hit) {
           entry.unmatched.push(tok);
           return;
@@ -2081,90 +2522,179 @@ function parseWhatsAppScheduleText(rawText, { defaultYear, defaultPastoralId, pa
             roleName: role.name,
           });
         }
+
+        if (isDualMissalCredencia && acolitosP) {
+          addVacancyToEntry(entry, acolitosP, 'Credência', 1);
+        }
       });
   };
 
-  lines.forEach((line) => {
-    // 1. Detecta data: 07/11 ou 07/11/2026
-    const dateMatch = line.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/);
-    if (dateMatch) {
-      const dd = String(Number(dateMatch[1])).padStart(2, '0');
-      const mm = String(Number(dateMatch[2])).padStart(2, '0');
-      const yyyy = dateMatch[3]
-        ? dateMatch[3].length === 2
-          ? `20${dateMatch[3]}`
-          : dateMatch[3]
-        : String(defaultYear);
-      currentDate = `${yyyy}-${mm}-${dd}`;
-      currentDayHint = line;
-    }
+  // Verifica se é formato CSV estruturado (cabeçalho com Data e Horário/Local separados por ; ou ,)
+  const firstLineNorm = normText(rawLines[0] || '');
+  const isCsvMode =
+    rawLines.length >= 2 &&
+    (rawLines[0].includes(';') || rawLines[0].split(',').length >= 4) &&
+    firstLineNorm.includes('data') &&
+    (firstLineNorm.includes('horario') || firstLineNorm.includes('hora') || firstLineNorm.includes('coroinha') || firstLineNorm.includes('acolito'));
 
-    // 2. Detecta horário: 17h30, 19:00, 07h
-    const timeMatch = line.match(/(\d{1,2})\s*[h:]\s*(\d{2})?/i);
-    if (timeMatch && (dateMatch || /[\u{1F550}-\u{1F567}]|^\s*\d{1,2}\s*[h:]/u.test(line) || line.includes('—') || line.includes('-'))) {
-      const hh = String(Number(timeMatch[1])).padStart(2, '0');
-      const min = timeMatch[2] ? timeMatch[2] : '00';
-      const loc = detectLocation(line) || defaultLoc;
-      ensureEntry(`${hh}:${min}`, loc, line);
+  if (isCsvMode) {
+    const sep = rawLines[0].includes(';') ? ';' : ',';
+    const parseCsvRow = (line) =>
+      line
+        .split(sep)
+        .map((c) => c.trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
 
-      // Se a mesma linha já traz "Coroinhas:", "Acólitos:", "Coord.:" separados por "|" ou "—"
-      const afterTime = line.slice(timeMatch.index + timeMatch[0].length);
-      if (/(coroinhas|ac[oó]litos|coord\.?)\s*:/i.test(afterTime)) {
-        const segments = afterTime.split('|');
-        segments.forEach((seg) => {
-          const corM = seg.match(/coroinhas\s*:\s*(.+)$/i);
-          const acoM = seg.match(/ac[oó]litos?\s*:\s*(.+)$/i);
-          const coordM = seg.match(/coord(?:enador[a]?)?\.?\s*:\s*(.+)$/i);
-          if (corM && coroinhasP) addNamesToEntry(currentEntry, corM[1], coroinhasP.id, false);
-          else if (acoM && acolitosP) addNamesToEntry(currentEntry, acoM[1], acolitosP.id, false);
-          else if (coordM) addNamesToEntry(currentEntry, coordM[1], currentEntry.assignments[0]?.pastoralId || coroinhasP?.id, true);
-        });
+    const headers = parseCsvRow(rawLines[0]).map((h) => normText(h));
+    const idxDate = headers.findIndex((h) => h.includes('data'));
+    const idxTime = headers.findIndex((h) => h.includes('hora'));
+    const idxLoc = headers.findIndex((h) => h.includes('local') || h.includes('comunidade') || h.includes('igreja'));
+    const idxCor = headers.findIndex((h) => h.includes('coroinha'));
+    const idxAco = headers.findIndex((h) => h.includes('acolito'));
+    const idxCoord = headers.findIndex((h) => h.includes('coord'));
+
+    rawLines.slice(1).forEach((rowLine) => {
+      const cols = parseCsvRow(rowLine);
+      const rawDate = idxDate >= 0 ? cols[idxDate] || '' : '';
+      const rawTime = idxTime >= 0 ? cols[idxTime] || '' : '';
+      const dMatch = rawDate.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/);
+      const tMatch = rawTime.match(/(\d{1,2})\s*[h:]\s*(\d{2})?/i);
+      if (!dMatch || !tMatch) return;
+
+      const dd = String(Number(dMatch[1])).padStart(2, '0');
+      const mm = String(Number(dMatch[2])).padStart(2, '0');
+      if (mm === '12') sawDecember = true;
+      const yyyy = dMatch[3]
+        ? dMatch[3].length === 2
+          ? `20${dMatch[3]}`
+          : dMatch[3]
+        : String(sawDecember && mm === '01' ? defaultYear + 1 : defaultYear);
+      const iso = `${yyyy}-${mm}-${dd}`;
+      const timeStr = `${String(Number(tMatch[1])).padStart(2, '0')}:${tMatch[2] || '00'}`;
+      const loc = (idxLoc >= 0 ? detectLocation(cols[idxLoc]) : null) || defaultLoc;
+      const entry = ensureEntry(iso, timeStr, loc, rawDate);
+
+      if (idxCor >= 0 && coroinhasP) {
+        addNamesToEntry(entry, cols[idxCor] || '', coroinhasP.id, false);
+      }
+      if (idxAco >= 0 && acolitosP) {
+        addNamesToEntry(entry, cols[idxAco] || '', acolitosP.id, false);
+      }
+      if (idxCoord >= 0 && cols[idxCoord]) {
+        addNamesToEntry(entry, cols[idxCoord], coroinhasP?.id || acolitosP?.id, true);
+      }
+    });
+  } else {
+    rawLines.forEach((line) => {
+      // 1. Detecta data: 07/11 ou 07/11/2026
+      const dateMatch = line.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/);
+      if (dateMatch) {
+        const dd = String(Number(dateMatch[1])).padStart(2, '0');
+        const mm = String(Number(dateMatch[2])).padStart(2, '0');
+        if (mm === '12') sawDecember = true;
+        const yyyy = dateMatch[3]
+          ? dateMatch[3].length === 2
+            ? `20${dateMatch[3]}`
+            : dateMatch[3]
+          : String(sawDecember && mm === '01' ? defaultYear + 1 : defaultYear);
+        currentDate = `${yyyy}-${mm}-${dd}`;
+        currentDayHint = line;
+      }
+
+      // 2. Detecta horário: 17h30, 19:00, 07h
+      const timeMatch = line.match(/(\d{1,2})\s*[h:]\s*(\d{2})?/i);
+      if (timeMatch && (dateMatch || /[\u{1F550}-\u{1F567}]|^\s*\d{1,2}\s*[h:]/u.test(line) || line.includes('—') || line.includes('-'))) {
+        const hh = String(Number(timeMatch[1])).padStart(2, '0');
+        const min = timeMatch[2] ? timeMatch[2] : '00';
+        const loc = detectLocation(line) || defaultLoc;
+        ensureEntry(currentDate, `${hh}:${min}`, loc, line);
+
+        const afterTime = line.slice(timeMatch.index + timeMatch[0].length);
+        if (/(coroinhas|ac[oó]litos|coord\.?)\s*:/i.test(afterTime)) {
+          const segments = afterTime.split('|');
+          segments.forEach((seg) => {
+            const corM = seg.match(/coroinhas\s*:\s*(.*)$/i);
+            const acoM = seg.match(/ac[oó]litos?\s*:\s*(.*)$/i);
+            const coordM = seg.match(/coord(?:enador[a]?)?\.?\s*:\s*(.+)$/i);
+            if (corM && coroinhasP) addNamesToEntry(currentEntry, corM[1], coroinhasP.id, false);
+            else if (acoM && acolitosP) addNamesToEntry(currentEntry, acoM[1], acolitosP.id, false);
+            else if (coordM) addNamesToEntry(currentEntry, coordM[1], currentEntry.assignments[0]?.pastoralId || coroinhasP?.id, true);
+          });
+          return;
+        }
+
+        const inlineColon = afterTime.match(/:\s*(.+)$/);
+        if (inlineColon && defaultPastoralId !== 'auto') {
+          addNamesToEntry(currentEntry, inlineColon[1], defaultPastoralId, false);
+        }
         return;
       }
 
-      // Se na própria linha houver nomes após "-" ou ":" (ex: "19h00 - Matriz: Alice, Emanuelly")
-      const inlineColon = afterTime.match(/:\s*(.+)$/);
-      if (inlineColon && defaultPastoralId !== 'auto') {
-        addNamesToEntry(currentEntry, inlineColon[1], defaultPastoralId, false);
+      if (!currentEntry) return;
+
+      // 3. Linhas de integrantes / coordenador / observação dentro da celebração atual
+      const corLine = line.match(/^(?:[-•*]\s*)?coroinhas\s*:\s*(.*)$/i);
+      if (corLine && coroinhasP) {
+        addNamesToEntry(currentEntry, corLine[1], coroinhasP.id, false);
+        return;
       }
-      return;
+
+      const acoLine = line.match(/^(?:[-•*]\s*)?ac[oó]litos?\s*:\s*(.*)$/i);
+      if (acoLine && acolitosP) {
+        addNamesToEntry(currentEntry, acoLine[1], acolitosP.id, false);
+        return;
+      }
+
+      const coordLine = line.match(/^(?:[-•*]\s*)?coord(?:enador[a]?)?\.?\s*:\s*(.+)$/i);
+      if (coordLine) {
+        const targetPid = currentEntry.assignments[0]?.pastoralId || coroinhasP?.id || acolitosP?.id;
+        addNamesToEntry(currentEntry, coordLine[1], targetPid, true);
+        return;
+      }
+
+      const obsLine = line.match(/^(?:[-•*]\s*)?obs(?:erva[cç][aã]o)?\.?\s*:\s*(.+)$/i);
+      if (obsLine) {
+        currentEntry.notes.push(obsLine[1].trim());
+        return;
+      }
+
+      if (defaultPastoralId !== 'auto' && !dateMatch) {
+        addNamesToEntry(currentEntry, line.replace(/^[-•*]\s*/, ''), defaultPastoralId, false);
+      }
+    });
+  }
+
+  // 4. Aplica mínimos configuráveis por celebração (completando a diferença com vagasAbertas)
+  entries.forEach((entry) => {
+    if (coroinhasP && minCoroinhas > 0 && !(skipSunday7Cor && isSunday7AM(entry.date, entry.time))) {
+      const corAssigned = entry.assignments.filter(
+        (a) => a.pastoralId === coroinhasP.id && !normText(a.roleName).includes('coordenador'),
+      ).length;
+      const corVacOpen = entry.vagasAbertas
+        .filter((v) => v.pastoralId === coroinhasP.id)
+        .reduce((s, v) => s + Number(v.quantidade || 0), 0);
+      const missingCor = minCoroinhas - (corAssigned + corVacOpen);
+      if (missingCor > 0) {
+        addVacancyToEntry(entry, coroinhasP, 'Altar', missingCor);
+      }
     }
 
-    if (!currentEntry) return;
-
-    // 3. Linhas de integrantes / coordenador / observação dentro da celebração atual
-    const corLine = line.match(/^(?:[-•*]\s*)?coroinhas\s*:\s*(.+)$/i);
-    if (corLine && coroinhasP) {
-      addNamesToEntry(currentEntry, corLine[1], coroinhasP.id, false);
-      return;
-    }
-
-    const acoLine = line.match(/^(?:[-•*]\s*)?ac[oó]litos?\s*:\s*(.+)$/i);
-    if (acoLine && acolitosP) {
-      addNamesToEntry(currentEntry, acoLine[1], acolitosP.id, false);
-      return;
-    }
-
-    const coordLine = line.match(/^(?:[-•*]\s*)?coord(?:enador[a]?)?\.?\s*:\s*(.+)$/i);
-    if (coordLine) {
-      const targetPid = currentEntry.assignments[0]?.pastoralId || coroinhasP?.id || acolitosP?.id;
-      addNamesToEntry(currentEntry, coordLine[1], targetPid, true);
-      return;
-    }
-
-    const obsLine = line.match(/^(?:[-•*]\s*)?obs(?:erva[cç][aã]o)?\.?\s*:\s*(.+)$/i);
-    if (obsLine) {
-      currentEntry.notes.push(obsLine[1].trim());
-      return;
-    }
-
-    // Linha com nomes soltos separados por vírgula (usa pastoral padrão escolhida)
-    if (defaultPastoralId !== 'auto' && !dateMatch) {
-      addNamesToEntry(currentEntry, line.replace(/^[-•*]\s*/, ''), defaultPastoralId, false);
+    if (acolitosP && minAcolitos > 0) {
+      const acoAssigned = entry.assignments.filter(
+        (a) => a.pastoralId === acolitosP.id && !normText(a.roleName).includes('coordenador'),
+      ).length;
+      const acoVacOpen = entry.vagasAbertas
+        .filter((v) => v.pastoralId === acolitosP.id)
+        .reduce((s, v) => s + Number(v.quantidade || 0), 0);
+      const missingAco = minAcolitos - (acoAssigned + acoVacOpen);
+      if (missingAco > 0) {
+        addVacancyToEntry(entry, acolitosP, 'Credência', missingAco);
+      }
     }
   });
 
-  return entries.filter((e) => e.assignments.length > 0 || e.unmatched.length > 0);
+  return entries.filter(
+    (e) => e.assignments.length > 0 || e.vagasAbertas.length > 0 || e.unmatched.length > 0,
+  );
 }
 
 function openWhatsAppImportModal({ user }, onSaved) {
@@ -2181,34 +2711,56 @@ function openWhatsAppImportModal({ user }, onSaved) {
   let parsedEntries = [];
 
   openModal({
-    title: 'Importar Escala (Texto WhatsApp)',
-    maxWidth: 'max-w-3xl',
+    title: 'Importar Escala (WhatsApp / CSV) com Detecção de Vagas',
+    maxWidth: 'max-w-4xl',
     bodyHtml: `
       <div class="space-y-4">
         <div class="rounded-xl bg-amber-50 border border-amber-300 p-3.5 text-xs text-[#4E342E] space-y-1">
-          <p class="font-bold text-[#78350F]">Como funciona:</p>
-          <p>Cole abaixo o texto da escala no padrão do WhatsApp (com <strong>📌 Dia</strong>, <strong>🕖 Horário</strong>, Local e nomes separados por vírgula). Celebrações na mesma Data, Horário e Local serão unificadas automaticamente no Cloud Firestore.</p>
+          <p class="font-bold text-[#78350F]">Detecção automática de Vagas em Aberto:</p>
+          <p>Cole o texto do WhatsApp ou carregue uma planilha <strong>CSV/Excel</strong>. O importador detecta automaticamente <code>VAGA</code>, <code>FALTA</code>, <code>(sem escala)</code>, acúmulo de função nos Acólitos (<code>Nome (Missal / Credência)</code> → escala em Missal + abre vaga em Credência) e completa o mínimo desejado por celebração.</p>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>
-            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Ano de Referência</label>
+            <label class="block text-[11px] font-bold uppercase tracking-wider text-[#5D4037] mb-1">Ano de Referência</label>
             <input id="wa-import-year" type="number" value="2026" min="2024" max="2035"
               class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm font-semibold outline-none focus:border-[#B45309]">
           </div>
           <div>
-            <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Pastoral Padrão (quando não escrita na linha)</label>
-            <select id="wa-import-pastoral" class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-sm font-semibold outline-none focus:border-[#B45309]">
-              <option value="auto">Automático (detectar Coroinhas: / Acólitos:)</option>
+            <label class="block text-[11px] font-bold uppercase tracking-wider text-[#5D4037] mb-1">Pastoral Padrão</label>
+            <select id="wa-import-pastoral" class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] bg-white text-xs sm:text-sm font-semibold outline-none focus:border-[#B45309]">
+              <option value="auto">Automático (Coroinhas:/Acólitos:)</option>
               ${managedPastorals.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('')}
             </select>
           </div>
+          <div>
+            <label for="wa-min-cor" class="block text-[11px] font-bold uppercase tracking-wider text-[#5D4037] mb-1">Mín. Coroinhas / missa</label>
+            <input id="wa-min-cor" type="number" min="0" max="10" placeholder="Opcional (ex: 3)"
+              class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm font-semibold outline-none focus:border-[#B45309]">
+          </div>
+          <div>
+            <label for="wa-min-aco" class="block text-[11px] font-bold uppercase tracking-wider text-[#5D4037] mb-1">Mín. Acólitos / missa</label>
+            <input id="wa-min-aco" type="number" min="0" max="10" placeholder="Opcional (ex: 2)"
+              class="w-full px-3 py-2 rounded-xl border border-[#E6DACE] text-sm font-semibold outline-none focus:border-[#B45309]">
+          </div>
+        </div>
+
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-[#FAF6F0] border border-[#E6DACE] rounded-xl px-3.5 py-2.5">
+          <label class="inline-flex items-center gap-2 text-xs font-semibold text-[#3E2723] cursor-pointer select-none">
+            <input id="wa-skip-sun7-cor" type="checkbox" checked class="rounded text-[#B45309] focus:ring-[#B45309]">
+            <span>Não abrir vaga de Coroinhas nas missas de Domingo 07:00</span>
+          </label>
+          <label class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-amber-50 border border-[#D7C4B2] text-xs font-bold text-[#5D4037] cursor-pointer transition shrink-0">
+            <i data-lucide="upload" class="w-3.5 h-3.5 text-[#B45309]"></i>
+            Carregar CSV / Excel
+            <input id="wa-import-csv-file" type="file" accept=".csv,.txt" class="hidden">
+          </label>
         </div>
 
         <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Texto da Escala (WhatsApp) *</label>
-          <textarea id="wa-import-text" rows="7"
-            placeholder="📌 07/11 (Sáb)&#10;🕖 17h30 - Matriz&#10;Coroinhas: Eloah, Bernardo, Théo, Carol, Rafael P.&#10;Acólitos: Lorenzo, Miguel, Manu&#10;Coord.: João Pedro&#10;&#10;🕖 19h00 - Matriz&#10;Coroinhas: Helena 1, Olívia, Alice&#10;Acólitos: Marina&#10;Coord.: Gustavo"
+          <label class="block text-xs font-bold uppercase tracking-wider text-[#5D4037] mb-1">Texto da Escala (WhatsApp ou CSV) *</label>
+          <textarea id="wa-import-text" rows="6"
+            placeholder="📌 02/01 (Sáb)&#10;🕖 19h00 - Maria Goretti&#10;Coroinhas: (sem disponibilidade)&#10;Acólitos: José Flávio (Missal / Credência)&#10;&#10;📌 03/01 (Dom)&#10;🕖 07h00 - Matriz&#10;Coroinhas: (sem escala)&#10;Acólitos: Milena (Missal / Credência)"
             class="w-full px-3.5 py-2.5 rounded-xl border border-[#E6DACE] bg-[#FAF6F0] focus:bg-white text-xs sm:text-sm font-mono focus:border-[#B45309] outline-none"></textarea>
         </div>
 
@@ -2221,7 +2773,7 @@ function openWhatsAppImportModal({ user }, onSaved) {
           <span id="wa-parse-summary" class="text-xs font-semibold text-[#6D4C41]"></span>
         </div>
 
-        <div id="wa-preview-box" class="hidden space-y-2.5 max-h-64 overflow-y-auto custom-scrollbar pr-1"></div>
+        <div id="wa-preview-box" class="hidden space-y-2.5 max-h-72 overflow-y-auto custom-scrollbar pr-1"></div>
 
         <div class="flex justify-end gap-2 pt-3 border-t border-[#E6DACE]/80">
           <button type="button" id="cancel-wa-import" class="px-4 py-2 rounded-xl border border-[#E6DACE] text-sm font-semibold text-[#5D4037] hover:bg-[#FAF6F0]">Cancelar</button>
@@ -2236,56 +2788,60 @@ function openWhatsAppImportModal({ user }, onSaved) {
       const textEl = bodyEl.querySelector('#wa-import-text');
       const yearEl = bodyEl.querySelector('#wa-import-year');
       const pastoralEl = bodyEl.querySelector('#wa-import-pastoral');
+      const minCorEl = bodyEl.querySelector('#wa-min-cor');
+      const minAcoEl = bodyEl.querySelector('#wa-min-aco');
+      const skipSun7El = bodyEl.querySelector('#wa-skip-sun7-cor');
+      const csvFileEl = bodyEl.querySelector('#wa-import-csv-file');
       const previewBox = bodyEl.querySelector('#wa-preview-box');
       const summaryEl = bodyEl.querySelector('#wa-parse-summary');
       const confirmBtn = bodyEl.querySelector('#btn-wa-confirm');
 
       bodyEl.querySelector('#cancel-wa-import').addEventListener('click', closeModal);
 
-      bodyEl.querySelector('#btn-wa-parse').addEventListener('click', () => {
-        const raw = textEl.value.trim();
-        if (!raw) {
-          showToast('Cole o texto da escala do WhatsApp antes de analisar.', 'error');
-          return;
-        }
-        parsedEntries = parseWhatsAppScheduleText(raw, {
-          defaultYear: Number(yearEl.value) || 2026,
-          defaultPastoralId: pastoralEl.value,
-          pastorals,
-          locations,
-          celebrationTypes,
-          roles,
-          users,
-        });
+      csvFileEl?.addEventListener('change', (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          textEl.value = String(reader.result || '');
+          showToast(`Arquivo "${file.name}" carregado. Clique em Analisar e Pré-visualizar.`, 'info');
+        };
+        reader.readAsText(file, 'utf-8');
+      });
 
-        if (parsedEntries.length === 0) {
-          previewBox.classList.add('hidden');
-          confirmBtn.disabled = true;
-          summaryEl.textContent = 'Nenhuma celebração reconhecida. Verifique se há dia (DD/MM) e horário (HHhMM).';
-          return;
-        }
-
+      function renderPreviewTable() {
         const totalAsg = parsedEntries.reduce((s, e) => s + e.assignments.length, 0);
-        summaryEl.textContent = `${parsedEntries.length} ${parsedEntries.length === 1 ? 'celebração detectada' : 'celebrações detectadas'} • ${totalAsg} posições identificadas.`;
-        confirmBtn.disabled = totalAsg === 0;
+        const totalVagas = parsedEntries.reduce(
+          (s, e) => s + (e.vagasAbertas || []).reduce((vs, v) => vs + Number(v.quantidade || 0), 0),
+          0,
+        );
+        summaryEl.textContent = `${parsedEntries.length} ${parsedEntries.length === 1 ? 'celebração' : 'celebrações'} • ${totalAsg} posições • 🟡 ${totalVagas} ${totalVagas === 1 ? 'vaga em aberto' : 'vagas em aberto'}.`;
+        confirmBtn.disabled = totalAsg === 0 && totalVagas === 0;
         previewBox.classList.remove('hidden');
 
         previewBox.innerHTML = parsedEntries
-          .map((e) => {
+          .map((e, eIdx) => {
             const matchExisting = existingSchedules.find(
               (s) => s.date === e.date && s.time === e.time && (s.locationId === e.locationId || normText(s.location) === normText(e.location)),
             );
+            const entryVacSum = (e.vagasAbertas || []).reduce((s, v) => s + Number(v.quantidade || 0), 0);
             return `
-              <div class="rounded-xl border border-[#E6DACE] bg-[#FAF6F0] p-3 space-y-1.5 text-xs">
+              <div class="rounded-xl border border-[#E6DACE] bg-[#FAF6F0] p-3 space-y-2 text-xs">
                 <div class="flex items-center justify-between gap-2 flex-wrap">
                   <span class="font-extrabold text-[#3E2723]">${escapeHtml(formatDateBR(e.date))} às ${escapeHtml(e.time)} • ${escapeHtml(e.location)}</span>
-                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                    matchExisting ? 'bg-amber-100 text-[#92400E] border-amber-300' : 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                  }">
-                    ${matchExisting ? 'Atualizar / Mesclar existente' : 'Nova escala'}
-                  </span>
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    ${
+                      entryVacSum > 0
+                        ? `<span class="vacancy-pill text-[10px]">🟡 ${entryVacSum} ${entryVacSum === 1 ? 'vaga em aberto' : 'vagas em aberto'}</span>`
+                        : ''
+                    }
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                      matchExisting ? 'bg-amber-100 text-[#92400E] border-amber-300' : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                    }">
+                      ${matchExisting ? 'Atualizar / Mesclar existente' : 'Nova escala'}
+                    </span>
+                  </div>
                 </div>
-                <p class="text-[11px] text-[#6D4C41]">${escapeHtml(e.celebrationType)}</p>
                 <div class="flex items-center gap-1 flex-wrap">
                   ${e.assignments
                     .map(
@@ -2298,6 +2854,26 @@ function openWhatsAppImportModal({ user }, onSaved) {
                     .join('')}
                 </div>
                 ${
+                  (e.vagasAbertas || []).length > 0
+                    ? `
+                  <div class="flex items-center gap-1.5 flex-wrap pt-1 border-t border-[#E6DACE]/70">
+                    ${e.vagasAbertas
+                      .map(
+                        (v, vIdx) => `
+                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-[#78350F] border border-amber-400 text-[10px] font-extrabold">
+                        ${escapeHtml(formatVacancyBadgeText(v, pastoralMap))}
+                        <button type="button" data-imp-vac-dec="${eIdx}:${vIdx}" class="px-1 rounded hover:bg-amber-200" title="Diminuir">−</button>
+                        <button type="button" data-imp-vac-inc="${eIdx}:${vIdx}" class="px-1 rounded hover:bg-amber-200" title="Aumentar">+</button>
+                        <button type="button" data-imp-vac-del="${eIdx}:${vIdx}" class="px-1 rounded text-red-700 hover:bg-red-100" title="Remover vaga">×</button>
+                      </span>
+                    `,
+                      )
+                      .join('')}
+                  </div>
+                `
+                    : ''
+                }
+                ${
                   e.unmatched.length > 0
                     ? `<p class="text-[11px] text-amber-800 font-semibold">Não encontrados no cadastro: ${escapeHtml(e.unmatched.join(', '))}</p>`
                     : ''
@@ -2307,7 +2883,63 @@ function openWhatsAppImportModal({ user }, onSaved) {
           })
           .join('');
 
+        previewBox.querySelectorAll('[data-imp-vac-dec]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const [eIdx, vIdx] = btn.dataset.impVacDec.split(':').map(Number);
+            const v = parsedEntries[eIdx]?.vagasAbertas?.[vIdx];
+            if (!v) return;
+            v.quantidade -= 1;
+            if (v.quantidade <= 0) parsedEntries[eIdx].vagasAbertas.splice(vIdx, 1);
+            renderPreviewTable();
+          });
+        });
+        previewBox.querySelectorAll('[data-imp-vac-inc]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const [eIdx, vIdx] = btn.dataset.impVacInc.split(':').map(Number);
+            const v = parsedEntries[eIdx]?.vagasAbertas?.[vIdx];
+            if (!v) return;
+            v.quantidade = Math.min(10, Number(v.quantidade) + 1);
+            renderPreviewTable();
+          });
+        });
+        previewBox.querySelectorAll('[data-imp-vac-del]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const [eIdx, vIdx] = btn.dataset.impVacDel.split(':').map(Number);
+            parsedEntries[eIdx]?.vagasAbertas?.splice(vIdx, 1);
+            renderPreviewTable();
+          });
+        });
+
         refreshIcons();
+      }
+
+      bodyEl.querySelector('#btn-wa-parse').addEventListener('click', () => {
+        const raw = textEl.value.trim();
+        if (!raw) {
+          showToast('Cole o texto da escala ou carregue um arquivo CSV antes de analisar.', 'error');
+          return;
+        }
+        parsedEntries = parseWhatsAppScheduleText(raw, {
+          defaultYear: Number(yearEl.value) || 2026,
+          defaultPastoralId: pastoralEl.value,
+          pastorals,
+          locations,
+          celebrationTypes,
+          roles,
+          users,
+          skipSunday7Cor: Boolean(skipSun7El?.checked),
+          minCoroinhas: Math.max(0, parseInt(minCorEl?.value, 10) || 0),
+          minAcolitos: Math.max(0, parseInt(minAcoEl?.value, 10) || 0),
+        });
+
+        if (parsedEntries.length === 0) {
+          previewBox.classList.add('hidden');
+          confirmBtn.disabled = true;
+          summaryEl.textContent = 'Nenhuma celebração reconhecida. Verifique se há dia (DD/MM) e horário (HHhMM).';
+          return;
+        }
+
+        renderPreviewTable();
       });
 
       confirmBtn.addEventListener('click', () => {
@@ -2316,11 +2948,12 @@ function openWhatsAppImportModal({ user }, onSaved) {
         let savedCount = 0;
 
         parsedEntries.forEach((e) => {
-          if (e.assignments.length === 0) return;
+          if (e.assignments.length === 0 && (e.vagasAbertas || []).length === 0) return;
           const existing = latestSchedules.find(
             (s) => s.date === e.date && s.time === e.time && (s.locationId === e.locationId || normText(s.location) === normText(e.location)),
           );
           const baseAssignments = existing ? [...(existing.assignments || [])] : [];
+          const baseVagas = existing ? [...(existing.vagasAbertas || [])] : [];
 
           e.assignments.forEach((a) => {
             const already = baseAssignments.some(
@@ -2336,6 +2969,17 @@ function openWhatsAppImportModal({ user }, onSaved) {
             }
           });
 
+          (e.vagasAbertas || []).forEach((v) => {
+            const idx = baseVagas.findIndex(
+              (bv) => bv.pastoralId === v.pastoralId && normText(bv.funcao) === normText(v.funcao),
+            );
+            if (idx >= 0) {
+              baseVagas[idx] = { ...baseVagas[idx], quantidade: v.quantidade };
+            } else {
+              baseVagas.push(v);
+            }
+          });
+
           const notesJoined = [existing?.notes, ...e.notes].filter(Boolean).join(' | ');
           dataService.saveSchedule({
             id: existing?.id,
@@ -2345,12 +2989,17 @@ function openWhatsAppImportModal({ user }, onSaved) {
             location: e.location,
             celebrationTypeId: existing?.celebrationTypeId || e.celebrationTypeId,
             celebrationType: existing?.celebrationType || e.celebrationType,
-            pastoralId: existing?.pastoralId || baseAssignments[0].pastoralId,
+            pastoralId:
+              existing?.pastoralId ||
+              baseAssignments[0]?.pastoralId ||
+              baseVagas[0]?.pastoralId ||
+              managedPastorals[0]?.id,
             eucharisticPrayerId: existing?.eucharisticPrayerId || 'oe_2',
             eucharisticPrayerSource: existing?.eucharisticPrayerSource || 'default',
             celebrantScript: existing?.celebrantScript || '',
             notes: notesJoined,
             assignments: baseAssignments,
+            vagasAbertas: baseVagas,
           });
           savedCount += 1;
         });

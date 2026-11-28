@@ -93,6 +93,51 @@ export function renderFamilyMembersLegend(user) {
   `;
 }
 
+/**
+ * Retorna a lista de integrantes elegíveis da conta logada (individual ou Conta Familiar)
+ * que pertencem à pastoral da vaga aberta e ainda NÃO estão escalados naquela celebração.
+ */
+export function getEligibleMembersForVacancy(user, schedule, vacancy) {
+  if (!user || !schedule || !vacancy || Number(vacancy.quantidade) <= 0) return [];
+  const targetPid = vacancy.pastoralId;
+  if (!targetPid) return [];
+
+  const userHasPastoral = getUserMemberships(user).some((m) => m.pastoralId === targetPid);
+  const assignedMemberIds = new Set(
+    (schedule.assignments || []).map((a) => a.memberId || a.userId),
+  );
+  const members = getAccountMembers(user);
+
+  return members
+    .filter((m) => {
+      const belongsToPastoral = m.pastoralId ? m.pastoralId === targetPid : userHasPastoral;
+      if (!belongsToPastoral) return false;
+      if (assignedMemberIds.has(m.id)) return false;
+      return true;
+    })
+    .map((m) => ({
+      accountId: user.id,
+      memberId: m.id,
+      name: m.name,
+    }));
+}
+
+/**
+ * Formata o selo visual de vaga em aberto (ex: "🟡 Faltam 2 Coroinhas (Altar)" / "🟡 Falta 1 Acólito (Credência)").
+ */
+export function formatVacancyBadgeText(vacancy, pastoralMap = {}) {
+  const qty = Math.max(1, parseInt(vacancy?.quantidade, 10) || 1);
+  const rawName =
+    vacancy?.pastoralNome ||
+    pastoralMap[vacancy?.pastoralId]?.shortName ||
+    pastoralMap[vacancy?.pastoralId]?.name ||
+    'Integrante';
+  const singularName = qty === 1 && rawName.endsWith('s') ? rawName.slice(0, -1) : rawName;
+  const verb = qty === 1 ? 'Falta' : 'Faltam';
+  const rolePart = vacancy?.funcao ? ` (${vacancy.funcao})` : '';
+  return `🟡 ${verb} ${qty} ${singularName}${rolePart}`;
+}
+
 export function resolveAssignedMemberName(userMap, userId, memberId) {
   const acc = userMap[userId];
   if (!acc) return 'Membro não encontrado';
