@@ -17,10 +17,13 @@ import {
   getCoordinatedPastoralIds,
   getTodayISO,
   isAnyCoordinator,
+  isFamilyAccount,
   isGeneralAdmin,
   MONTHS_PT,
   openModal,
   refreshIcons,
+  renderFamilyMemberPill,
+  renderFamilyMembersLegend,
   renderPastoralPill,
   showToast,
 } from '../utils/helpers.js';
@@ -32,6 +35,7 @@ let selectedDateISO = null;
 
 export function renderAgenda(container, { user }) {
   const anyCoord = isAnyCoordinator(user);
+  const isFam = isFamilyAccount(user);
   const pastorals = dataService.getPastorals();
   const pastoralMap = Object.fromEntries(pastorals.map((p) => [p.id, p]));
   const schedules = dataService.getSchedules();
@@ -198,8 +202,9 @@ export function renderAgenda(container, { user }) {
       <div class="bg-white rounded-2xl border border-[#E6DACE] px-4 py-3 flex items-center justify-between gap-3 flex-wrap shadow-xs">
         <div class="flex items-center gap-2.5 flex-wrap text-xs">
           <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-extrabold bg-[#3E2723] text-amber-300 border border-[#B45309]">
-            ⭐ Sua Escala (${personalMonthCount})
+            ⭐ ${isFam ? 'Escala da Família' : 'Sua Escala'} (${personalMonthCount})
           </span>
+          ${isFam ? renderFamilyMembersLegend(user) : ''}
           <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-semibold bg-[#F5EFE6] text-[#5D4037] border border-[#E6DACE]">
             <span class="w-2 h-2 rounded-full bg-[#8D6E63]"></span>
             Missa da Pastoral (${pastoralMonthCount})
@@ -264,6 +269,56 @@ export function renderAgenda(container, { user }) {
                   .map((it) => {
                     // 1. Card em DESTAQUE FORTE: Usuário (ou irmão da Conta Familiar) ESTÁ ESCALADO
                     if (it.isPersonalSchedule) {
+                      const famEntries = isFam && Array.isArray(it.familyEntries) && it.familyEntries.length > 0
+                        ? it.familyEntries
+                        : null;
+
+                      if (famEntries) {
+                        return `
+                          <article class="rounded-2xl border-2 border-[#D97706] bg-gradient-to-r from-[#3E2723] via-[#4E342E] to-[#5D4037] text-white p-4 sm:p-5 shadow-md space-y-3">
+                            <div class="space-y-1.5">
+                              <div class="flex items-center gap-2 flex-wrap">
+                                <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-amber-400 text-[#2B1B18] shadow-xs">
+                                  <i data-lucide="star" class="w-3.5 h-3.5"></i>
+                                  Escala da Família
+                                </span>
+                                <span class="text-xs font-extrabold text-amber-200 bg-white/10 px-2.5 py-0.5 rounded-lg border border-amber-300/30">
+                                  ${escapeHtml(formatDateBR(it.date))} • ${escapeHtml(it.time)}
+                                </span>
+                                ${
+                                  it.hasConflict
+                                    ? `<span class="inline-flex items-center gap-1 text-[11px] font-bold text-[#2B1B18] bg-amber-300 px-2 py-0.5 rounded-full">
+                                        <i data-lucide="clock-alert" class="w-3 h-3"></i>
+                                        Conflito de horário
+                                      </span>`
+                                    : ''
+                                }
+                              </div>
+                              <h5 class="text-base font-extrabold text-white">${escapeHtml(it.title)}</h5>
+                              <p class="text-xs text-amber-100/85 flex items-center gap-2 flex-wrap">
+                                <span class="capitalize font-semibold">${escapeHtml(formatWeekdayBR(it.date))}</span>
+                                <span>•</span>
+                                <span>${escapeHtml(it.location)}</span>
+                              </p>
+                            </div>
+
+                            <div class="flex flex-col sm:flex-row sm:flex-wrap gap-2 pt-2 border-t border-white/15">
+                              ${famEntries
+                                .map(
+                                  (entry) => `
+                                <div class="inline-flex items-center gap-2 flex-wrap bg-white/95 text-[#3E2723] rounded-xl px-3 py-1.5 shadow-2xs">
+                                  ${renderFamilyMemberPill(user, entry.memberId, { compact: true, fallbackName: entry.memberName })}
+                                  ${renderPastoralPill(entry.pastoral, { compact: true })}
+                                  <span class="text-xs font-extrabold text-[#4E342E]">${escapeHtml(entry.roleName)}</span>
+                                </div>
+                              `,
+                                )
+                                .join('')}
+                            </div>
+                          </article>
+                        `;
+                      }
+
                       return `
                         <article class="rounded-2xl border-2 border-[#D97706] bg-gradient-to-r from-[#3E2723] via-[#4E342E] to-[#5D4037] text-white p-4 sm:p-5 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                           <div class="space-y-2">

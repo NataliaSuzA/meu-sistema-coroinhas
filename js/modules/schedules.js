@@ -56,6 +56,19 @@ function isCoordinatorRole(roleId, roleMap = {}) {
   return rName.includes('coordenador');
 }
 
+/**
+ * Filtra estritamente as posições pertencentes à pastoral selecionada na aba de equipe.
+ * Para membros comuns, oculta também posições de Coordenador de Plantão.
+ */
+function getStrictPastoralAssignments(sch, pastoralId, { isCoordOrAdmin, roleMap }) {
+  return (sch.assignments || []).filter((a) => {
+    const aPid = a.pastoralId || sch.pastoralId;
+    if (aPid !== pastoralId) return false;
+    if (!isCoordOrAdmin && isCoordinatorRole(a.roleId, roleMap)) return false;
+    return true;
+  });
+}
+
 function formatCoordinatorTitle(fullName) {
   const first = getFirstName(fullName).toLowerCase();
   return first.endsWith('a') ? 'Coordenadora' : 'Coordenador';
@@ -165,10 +178,22 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
     ...(isCoordOrAdmin ? [{ id: 'substitutions', label: '🔄 Controle de Trocas', icon: 'arrow-left-right', managed: false }] : []),
   ];
 
-  const myAssignmentsCount = schedules.reduce(
-    (sum, s) => sum + (s.assignments || []).filter((a) => a.userId === user.id).length,
-    0,
-  );
+  // Conta datas/celebrações únicas agendadas para o usuário (ou para a família)
+  const myUniqueCelebrationKeys = new Set();
+  schedules.forEach((s) => {
+    if ((s.assignments || []).some((a) => a.userId === user.id)) {
+      myUniqueCelebrationKeys.add(
+        `${s.date}|${s.time}|${String(s.location || '').trim().toLowerCase()}`,
+      );
+    }
+  });
+  const myAssignmentsCount = myUniqueCelebrationKeys.size;
+
+  const isSpecificPastoralTab =
+    activeTab !== 'my_dates' &&
+    activeTab !== 'all_managed' &&
+    activeTab !== 'coordinators' &&
+    activeTab !== 'substitutions';
 
   const filtered = schedules.filter((sch) => {
     if (activeTab === 'all_managed') return true;
@@ -179,12 +204,11 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
       if (selectedCoordinatorFilter === 'all') return true;
       return coordAsgs.some((a) => a.userId === selectedCoordinatorFilter);
     }
-    if (!isCoordOrAdmin) {
-      return (sch.assignments || []).some(
-        (a) => !isCoordinatorRole(a.roleId, roleMap) && (a.pastoralId || sch.pastoralId) === activeTab,
-      );
+    if (isSpecificPastoralTab) {
+      // Nível 1: exibe APENAS celebrações que possuem pelo menos 1 posição escalada nesta pastoral
+      return getStrictPastoralAssignments(sch, activeTab, { isCoordOrAdmin, roleMap }).length > 0;
     }
-    return sch.pastoralId === activeTab || (sch.assignments || []).some((a) => a.pastoralId === activeTab);
+    return false;
   });
 
   // Pedidos de substituição abertos feitos por colegas das pastorais do usuário
@@ -298,13 +322,10 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
                     ? coordSchedulesAll.length
                     : t.id === 'substitutions'
                       ? scopedSubstitutions.length
-                      : isCoordOrAdmin
-                        ? schedules.filter((s) => s.pastoralId === t.id || (s.assignments || []).some((a) => a.pastoralId === t.id)).length
-                        : schedules.filter((s) =>
-                            (s.assignments || []).some(
-                              (a) => !isCoordinatorRole(a.roleId, roleMap) && (a.pastoralId || s.pastoralId) === t.id,
-                            ),
-                          ).length;
+                      : schedules.filter(
+                          (s) =>
+                            getStrictPastoralAssignments(s, t.id, { isCoordOrAdmin, roleMap }).length > 0,
+                        ).length;
 
             return `
               <button type="button" data-tab="${t.id}"
@@ -417,6 +438,8 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
           .map((sch) =>
             renderScheduleCard(sch, {
               user,
+              activeTab,
+              isSpecificPastoralTab,
               isCoordOrAdmin,
               canCreateEdit,
               accessiblePastoralSet,
@@ -513,21 +536,27 @@ export function renderSchedules(container, { user, setHeaderContext, permissions
   refreshIcons();
 }
 
-function renderScheduleCard(sch, { user, isCoordOrAdmin = false, canCreateEdit, accessiblePastoralSet, userMap, roleMap, pastoralMap, ctMap, slotIndex, allSchedules = [] }) {
-  // Para Membro comum, exibe apenas integrantes das pastorais a que ele pertence e oculta o Plantão de Coordenação
-  const visibleAssignments = isCoordOrAdmin
-    ? sch.assignments || []
-    : (sch.assignments || []).filter(
-        (a) => !isCoordinatorRole(a.roleId, roleMap) && accessiblePastoralSet.has(a.pastoralId || sch.pastoralId),
-      );
+function renderScheduleCard(sch, { user, activeTab = '', isSpecificPastoralTab = false, isCoordOrAdmin = false, canCreateEdit, accessiblePastoralSet, userMap, roleMap, pastoralMap, ctMap, slotIndex, allSchedules = [] }) {
+  // Nível 2: quando uma aba de pastoral específica está selecionada (ex: Acólitos ou Coroinhas),
+  // exibe APENAS os integrantes e funções pertencentes àquela pastoral.
+  // Para Membro comum em qualquer aba, oculta também o Plantão de Coordenação.
+  const visibleAssignments = isSpecificPastoralTab
+    ? getStrictPastoralAssignments(sch, activeTab, { isCoordOrAdmin, roleMap })
+    : isCoordOrAdmin
+      ? sch.assignments || []
+      : (sch.assignments || []).filter(
+          (a) => !isCoordinatorRole(a.roleId, roleMap) && accessiblePastoralSet.has(a.pastoralId || sch.pastoralId),
+        );
   const myAssignmentsHere = visibleAssignments.filter((a) => a.userId === user.id);
   const isUserAssigned = myAssignmentsHere.length > 0;
   const canEdit = canCreateEdit && canManageSchedule(user, sch);
   const countdown = getCountdownBadge(sch.date);
   const isPast = countdown.diffDays < 0;
-  const cardPastoralId = isCoordOrAdmin
-    ? sch.pastoralId
-    : visibleAssignments[0]?.pastoralId || sch.pastoralId;
+  const cardPastoralId = isSpecificPastoralTab
+    ? activeTab
+    : isCoordOrAdmin
+      ? sch.pastoralId
+      : visibleAssignments[0]?.pastoralId || sch.pastoralId;
   const mainPastoral = pastoralMap[cardPastoralId] || pastoralMap[sch.pastoralId];
   const ctObj = ctMap[sch.celebrationTypeId];
   const oe = getEucharisticPrayerById(sch.eucharisticPrayerId);

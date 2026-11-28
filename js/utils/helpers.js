@@ -48,6 +48,51 @@ export function renderFamilyAccountBadge(user, { compact = false } = {}) {
   `;
 }
 
+/**
+ * Retorna a paleta determinística (pela ordem dos integrantes na Conta Familiar):
+ * 0 -> Dourado Suave | 1 -> Terracota / Vinho Suave | 2 -> Verde Oliva Suave
+ */
+export function getFamilyMemberTheme(user, memberId) {
+  const members = getAccountMembers(user);
+  const rawIdx = members.findIndex((m) => m.id === memberId);
+  const index = rawIdx >= 0 ? rawIdx : 0;
+  const member = members[index] || members[0] || { id: memberId, name: user?.name || 'Integrante' };
+  const paletteIdx = index % 3;
+  const firstName = getFirstName(member.name);
+  const initial = (firstName.charAt(0) || 'I').toUpperCase();
+  return {
+    index,
+    paletteIdx,
+    className: `family-member-pill family-member-pill-${paletteIdx}`,
+    initial,
+    name: member.name,
+    firstName,
+  };
+}
+
+export function renderFamilyMemberPill(user, memberId, { compact = false, fallbackName = '' } = {}) {
+  if (!isFamilyAccount(user)) return '';
+  const theme = getFamilyMemberTheme(user, memberId);
+  const displayName = theme.name || fallbackName || 'Integrante';
+  const initial = (getFirstName(displayName).charAt(0) || theme.initial || 'I').toUpperCase();
+  return `
+    <span class="${theme.className}${compact ? ' family-member-pill-compact' : ''}">
+      <span class="family-member-avatar" aria-hidden="true">${escapeHtml(initial)}</span>
+      <span>${escapeHtml(displayName)}</span>
+    </span>
+  `;
+}
+
+export function renderFamilyMembersLegend(user) {
+  const members = getAccountMembers(user);
+  if (members.length <= 1) return '';
+  return `
+    <span class="inline-flex items-center gap-1.5 flex-wrap">
+      ${members.map((m) => renderFamilyMemberPill(user, m.id, { compact: true })).join('')}
+    </span>
+  `;
+}
+
 export function resolveAssignedMemberName(userMap, userId, memberId) {
   const acc = userMap[userId];
   if (!acc) return 'Membro não encontrado';
@@ -521,42 +566,110 @@ export function buildSyncedAgendaItems(user, { schedules, events, roles, pastora
     return String(roleMap[roleId] || '').toLowerCase().includes('coordenador');
   };
 
+  const memberOrderIndex = new Map(myAccountMembers.map((m, idx) => [m.id, idx]));
+  const personalGroupsByKey = new Map();
+
   schedules.forEach((sch) => {
     const myAssignments = (sch.assignments || []).filter((a) => a.userId === user.id);
 
     if (myAssignments.length > 0) {
-      myAssignments.forEach((asg) => {
-        const pastoral = pastoralMap[asg.pastoralId] || pastoralMap[sch.pastoralId];
-        const roleName = roleMap[asg.roleId] || 'Função';
-        const assignedMember = myAccountMembers.find((m) => m.id === asg.memberId) || myAccountMembers[0];
-        const memberName = assignedMember?.name || user.name;
-        const memberFirst = getFirstName(memberName);
-        const personKey = asg.memberId || asg.userId;
-        items.push({
-          id: `sync_${sch.id}_${asg.id}`,
-          sourceId: sch.id,
-          sourceType: 'schedule',
-          isPersonalSchedule: true,
-          isPastoralMass: false,
-          date: sch.date,
-          time: sch.time,
-          title: `${sch.celebrationType} • ${sch.location}`,
-          shortTag: isFam
-            ? `★ ${sch.time} ${memberFirst}`
-            : `★ ${sch.time} ${roleName}`,
-          assignedMemberName: memberName,
-          roleNames: roleName,
-          isCoordShift: isCoordRoleId(asg.roleId),
-          location: sch.location,
-          pastoral,
-          pastoralId: pastoral?.id || sch.pastoralId,
-          pastoralLabels: pastoral?.shortName || '',
-          eventType: isFam ? `ESCALADO: ${memberName} • ${roleName}` : `VOCÊ ESTÁ ESCALADO • ${roleName}`,
-          description: sch.notes || (isFam ? `Escalado: ${memberName} (${roleName})` : `Escalado(a) como ${roleName}`),
-          hasSubRequest: Boolean(asg.substitutionRequested),
-          hasConflict: hasTimeConflict(slotIndex, personKey, sch.date, sch.time),
+      if (isFam) {
+        const groupKey = `${sch.date}|${sch.time}|${String(sch.location || '').trim().toLowerCase()}`;
+        let group = personalGroupsByKey.get(groupKey);
+        if (!group) {
+          group = {
+            id: `sync_fam_${groupKey}`,
+            sourceId: sch.id,
+            sourceType: 'schedule',
+            isPersonalSchedule: true,
+            isPastoralMass: false,
+            isFamilyGrouped: true,
+            date: sch.date,
+            time: sch.time,
+            title: `${sch.celebrationType} • ${sch.location}`,
+            shortTag: '',
+            location: sch.location,
+            pastoral: pastoralMap[sch.pastoralId],
+            pastoralId: sch.pastoralId,
+            pastoralLabels: '',
+            eventType: 'ESCALA DA FAMÍLIA',
+            description: sch.notes || '',
+            hasSubRequest: false,
+            hasConflict: false,
+            familyEntries: [],
+          };
+          personalGroupsByKey.set(groupKey, group);
+          items.push(group);
+        }
+
+        myAssignments.forEach((asg) => {
+          const pastoral = pastoralMap[asg.pastoralId] || pastoralMap[sch.pastoralId];
+          const roleName = roleMap[asg.roleId] || 'Função';
+          const assignedMember = myAccountMembers.find((m) => m.id === asg.memberId) || myAccountMembers[0];
+          const memberId = assignedMember?.id || asg.memberId || user.id;
+          const memberName = assignedMember?.name || user.name;
+          const personKey = asg.memberId || asg.userId;
+          const conflict = hasTimeConflict(slotIndex, personKey, sch.date, sch.time);
+
+          group.familyEntries.push({
+            scheduleId: sch.id,
+            assignmentId: asg.id,
+            memberId,
+            memberName,
+            pastoral,
+            pastoralId: pastoral?.id || sch.pastoralId,
+            roleName,
+            isCoordShift: isCoordRoleId(asg.roleId),
+            hasSubRequest: Boolean(asg.substitutionRequested),
+            hasConflict: conflict,
+          });
+          if (asg.substitutionRequested) group.hasSubRequest = true;
+          if (conflict) group.hasConflict = true;
         });
-      });
+
+        group.familyEntries.sort(
+          (a, b) => (memberOrderIndex.get(a.memberId) ?? 99) - (memberOrderIndex.get(b.memberId) ?? 99),
+        );
+        const uniqueFirstNames = Array.from(new Set(group.familyEntries.map((e) => getFirstName(e.memberName))));
+        group.shortTag = `★ ${sch.time} ${uniqueFirstNames.join(' & ')}`;
+        group.assignedMemberName = uniqueFirstNames.join(' & ');
+        group.roleNames = group.familyEntries.map((e) => e.roleName).join(' / ');
+        group.pastoral = group.familyEntries[0]?.pastoral || group.pastoral;
+        group.pastoralLabels = Array.from(
+          new Set(group.familyEntries.map((e) => e.pastoral?.shortName).filter(Boolean)),
+        ).join(' / ');
+      } else {
+        myAssignments.forEach((asg) => {
+          const pastoral = pastoralMap[asg.pastoralId] || pastoralMap[sch.pastoralId];
+          const roleName = roleMap[asg.roleId] || 'Função';
+          const assignedMember = myAccountMembers.find((m) => m.id === asg.memberId) || myAccountMembers[0];
+          const memberName = assignedMember?.name || user.name;
+          const personKey = asg.memberId || asg.userId;
+          items.push({
+            id: `sync_${sch.id}_${asg.id}`,
+            sourceId: sch.id,
+            sourceType: 'schedule',
+            isPersonalSchedule: true,
+            isPastoralMass: false,
+            date: sch.date,
+            time: sch.time,
+            title: `${sch.celebrationType} • ${sch.location}`,
+            shortTag: `★ ${sch.time} ${roleName}`,
+            assignedMemberId: assignedMember?.id || asg.memberId || user.id,
+            assignedMemberName: memberName,
+            roleNames: roleName,
+            isCoordShift: isCoordRoleId(asg.roleId),
+            location: sch.location,
+            pastoral,
+            pastoralId: pastoral?.id || sch.pastoralId,
+            pastoralLabels: pastoral?.shortName || '',
+            eventType: `VOCÊ ESTÁ ESCALADO • ${roleName}`,
+            description: sch.notes || `Escalado(a) como ${roleName}`,
+            hasSubRequest: Boolean(asg.substitutionRequested),
+            hasConflict: hasTimeConflict(slotIndex, personKey, sch.date, sch.time),
+          });
+        });
+      }
     } else if (includePastoralSchedules) {
       // Exibe missas em que a(s) pastoral(is) do usuário participa(m), diferenciando do compromisso pessoal
       const matchingPastoralIds = Array.from(

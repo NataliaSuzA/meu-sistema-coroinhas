@@ -1,8 +1,9 @@
 /**
- * Módulo dedicado "Minhas Datas" (Suporte a Contas Familiares + Cancelamento de Substituição)
- * - Em Contas Familiares, exibe todas as escalas de todos os irmãos vinculados,
- *   destacando em cada card a tag "Escalado: [Nome do Integrante]".
- * - Permite solicitar substituição e, enquanto não aceita, clicar em "Cancelar Pedido de Substituição".
+ * Módulo dedicado "Minhas Datas" (Suporte a Contas Familiares Agrupadas + Diferenciação Suave por Integrante)
+ * - Em Contas Familiares, agrupa irmãos escalados na mesma data, horário e local em um único card de celebração
+ * - Exibe etiquetas discretas em tons terrosos/litúrgicos por integrante (Dourado Suave, Terracota Suave, Verde Oliva Suave)
+ *   com botão individual "Solicitar Substituição" alinhado à direita para cada irmão
+ * - Contador de "Minhas Datas" (Próximas / Todas) contabiliza celebrações únicas agendadas
  */
 
 import { dataService } from '../services/dataService.js';
@@ -12,6 +13,7 @@ import {
   escapeHtml,
   formatDateBR,
   formatWeekdayBR,
+  getAccountMembers,
   getCountdownBadge,
   getFirstName,
   getTodayISO,
@@ -20,6 +22,8 @@ import {
   openModal,
   refreshIcons,
   renderFamilyAccountBadge,
+  renderFamilyMemberPill,
+  renderFamilyMembersLegend,
   renderPastoralPill,
   resolveAssignedMemberName,
   showToast,
@@ -38,12 +42,17 @@ export function renderMyDatesContent(targetEl, { user, onChanged, onNotification
   const schedules = dataService.getSchedules();
   const slotIndex = buildUserTimeSlotIndex(schedules);
   const isFam = isFamilyAccount(user);
+  const familyMembers = getAccountMembers(user);
+  const memberOrderIndex = new Map(familyMembers.map((m, idx) => [m.id, idx]));
 
-  const allMine = [];
+  // Agrupa por celebração única (data + horário + local) para evitar cards duplicados em Contas Familiares
+  const groupsByKey = new Map();
+
   schedules.forEach((sch) => {
     (sch.assignments || []).forEach((asg) => {
       if (asg.userId !== user.id) return;
       const pastoral = pastoralMap[asg.pastoralId] || pastoralMap[sch.pastoralId];
+      const assignedMemberId = asg.memberId || user.id;
       const assignedName = resolveAssignedMemberName(userMap, asg.userId, asg.memberId);
       const personKey = asg.memberId || asg.userId;
       const rName = roleMap[asg.roleId]?.name || 'Função';
@@ -51,28 +60,53 @@ export function renderMyDatesContent(targetEl, { user, onChanged, onNotification
         asg.roleId === 'role_cor_coord' ||
         asg.roleId === 'role_aco_coord' ||
         rName.toLowerCase().includes('coordenador');
-      allMine.push({
+
+      const groupKey = `${sch.date}|${sch.time}|${String(sch.location || '').trim().toLowerCase()}`;
+      let group = groupsByKey.get(groupKey);
+      if (!group) {
+        group = {
+          key: groupKey,
+          schedule: sch,
+          date: sch.date,
+          time: sch.time,
+          location: sch.location,
+          celebrationType: sch.celebrationType,
+          countdown: getCountdownBadge(sch.date),
+          entries: [],
+        };
+        groupsByKey.set(groupKey, group);
+      }
+
+      group.entries.push({
         schedule: sch,
         assignment: asg,
         pastoral,
+        assignedMemberId,
         assignedName,
         roleName: rName,
         isCoordShift,
-        countdown: getCountdownBadge(sch.date),
         hasConflict: hasTimeConflict(slotIndex, personKey, sch.date, sch.time),
       });
     });
   });
 
-  allMine.sort((a, b) =>
-    `${a.schedule.date}T${a.schedule.time}`.localeCompare(`${b.schedule.date}T${b.schedule.time}`),
-  );
+  const allGroups = Array.from(groupsByKey.values())
+    .map((g) => {
+      g.entries.sort(
+        (a, b) =>
+          (memberOrderIndex.get(a.assignedMemberId) ?? 99) -
+            (memberOrderIndex.get(b.assignedMemberId) ?? 99) ||
+          a.assignedName.localeCompare(b.assignedName, 'pt-BR'),
+      );
+      return g;
+    })
+    .sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`));
 
-  const upcomingCount = allMine.filter((item) => item.schedule.date >= todayISO).length;
+  const upcomingCount = allGroups.filter((g) => g.date >= todayISO).length;
   const displayed =
     scopeFilter === 'upcoming'
-      ? allMine.filter((item) => item.schedule.date >= todayISO)
-      : allMine;
+      ? allGroups.filter((g) => g.date >= todayISO)
+      : allGroups;
 
   const rerender = () => {
     onNotificationsChanged?.();
@@ -89,9 +123,10 @@ export function renderMyDatesContent(targetEl, { user, onChanged, onNotification
                 <div class="flex items-center gap-2 flex-wrap">
                   <h4 class="text-base font-extrabold text-[#3E2723]">Minhas Datas Agendadas</h4>
                   ${renderFamilyAccountBadge(user, { compact: true })}
+                  ${renderFamilyMembersLegend(user)}
                 </div>
-                <p class="text-xs text-[#6D4C41]">
-                  ${isFam ? 'Todas as escalas dos irmãos vinculados à conta familiar, em ordem cronológica.' : 'Exclusivamente seus compromissos em ordem cronológica, com contagem regressiva.'}
+                <p class="text-xs text-[#6D4C41] mt-0.5">
+                  ${isFam ? 'Celebrações agrupadas por horário com diferenciação suave e substituição individual por irmão.' : 'Exclusivamente seus compromissos em ordem cronológica, com contagem regressiva.'}
                 </p>
               </div>`
             : `<div>
@@ -101,10 +136,11 @@ export function renderMyDatesContent(targetEl, { user, onChanged, onNotification
                     ${isFam ? 'Compromissos da Família' : 'Compromissos Pessoais'}
                   </span>
                   ${renderFamilyAccountBadge(user, { compact: true })}
+                  ${renderFamilyMembersLegend(user)}
                 </div>
                 <h3 class="text-xl font-extrabold text-[#3E2723]">Minhas Datas</h3>
                 <p class="text-sm text-[#6D4C41] mt-0.5">
-                  ${isFam ? 'Todas as datas, horários, locais e funções de todos os irmãos desta conta familiar.' : 'Todas as datas, horários, locais e funções em que você está escalado(a), em ordem cronológica.'}
+                  ${isFam ? 'Datas, horários, locais e funções dos irmãos desta conta familiar agrupados por celebração.' : 'Todas as datas, horários, locais e funções em que você está escalado(a), em ordem cronológica.'}
                 </p>
               </div>`
         }
@@ -120,7 +156,7 @@ export function renderMyDatesContent(targetEl, { user, onChanged, onNotification
             class="px-3 py-1.5 rounded-lg text-xs font-bold transition ${
               scopeFilter === 'all' ? 'bg-[#3E2723] text-white' : 'text-[#5D4037] hover:bg-[#FAF6F0]'
             }">
-            Todas (${allMine.length})
+            Todas (${allGroups.length})
           </button>
         </div>
       </div>
@@ -137,14 +173,148 @@ export function renderMyDatesContent(targetEl, { user, onChanged, onNotification
           : `
         <div class="space-y-3.5">
           ${displayed
-            .map(({ schedule: sch, assignment: asg, pastoral, assignedName, roleName, isCoordShift, countdown, hasConflict }) => {
+            .map((group) => {
+              const { schedule: sch, countdown, entries } = group;
               const isPast = countdown.diffDays < 0;
+
+              // Card para Conta Familiar (agrupado por celebração, com linha individual por irmão)
+              if (isFam) {
+                return `
+                  <article data-family-celebration-card="${escapeHtml(group.key)}" class="bg-white rounded-2xl border-2 ${
+                    isPast ? 'border-[#E6DACE] opacity-85' : 'user-schedule-card'
+                  } p-4 sm:p-5 space-y-3.5 transition">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div class="flex items-start gap-3.5 min-w-0">
+                        <div class="w-16 sm:w-20 rounded-2xl ${
+                          countdown.diffDays === 0
+                            ? 'bg-[#D97706] text-white'
+                            : isPast
+                              ? 'bg-stone-100 text-stone-500'
+                              : 'bg-[#3E2723] text-white'
+                        } p-2.5 text-center shrink-0 shadow-xs">
+                          <p class="text-xl font-extrabold leading-none">${escapeHtml(sch.date.slice(8, 10))}</p>
+                          <p class="text-[10px] font-bold uppercase tracking-wider mt-1 opacity-85">${escapeHtml(sch.date.slice(5, 7))}/${escapeHtml(sch.date.slice(2, 4))}</p>
+                          <p class="text-xs font-extrabold mt-1 text-amber-300 ${countdown.diffDays === 0 ? '!text-white' : isPast ? '!text-stone-500' : ''}">${escapeHtml(sch.time)}</p>
+                        </div>
+
+                        <div class="space-y-1 min-w-0">
+                          <div class="flex items-center gap-2 flex-wrap">
+                            <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold border ${countdown.cls}">
+                              <i data-lucide="hourglass" class="w-3 h-3"></i>
+                              ${escapeHtml(countdown.label)}
+                            </span>
+                            ${
+                              entries.length > 1
+                                ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#FAF6F0] text-[#5D4037] border border-[#E6DACE]">
+                                    <i data-lucide="users" class="w-3 h-3 text-[#B45309]"></i>
+                                    ${entries.length} irmãos nesta missa
+                                  </span>`
+                                : ''
+                            }
+                          </div>
+                          <h5 class="text-base font-extrabold text-[#3E2723]">${escapeHtml(sch.celebrationType)}</h5>
+                          <div class="flex items-center gap-3 flex-wrap text-xs text-[#6D4C41]">
+                            <span class="capitalize font-semibold">${escapeHtml(formatWeekdayBR(sch.date))}, ${escapeHtml(formatDateBR(sch.date))}</span>
+                            <span class="inline-flex items-center gap-1">
+                              <i data-lucide="map-pin" class="w-3.5 h-3.5 text-[#B45309]"></i>
+                              ${escapeHtml(sch.location)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <button type="button" data-md-liturgy="${sch.id}" data-md-date="${escapeHtml(sch.date)}"
+                        class="self-start sm:self-center shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-[#3E2723] hover:bg-[#5D4037] text-amber-300 transition">
+                        <i data-lucide="book-open" class="w-3.5 h-3.5"></i>
+                        Ver Liturgia Completa
+                      </button>
+                    </div>
+
+                    <!-- Lista individual de irmãos escalados nesta celebração -->
+                    <div class="pt-3 border-t border-[#E6DACE]/80 space-y-2">
+                      ${entries
+                        .map((entry) => {
+                          const asg = entry.assignment;
+                          const eSch = entry.schedule;
+                          return `
+                            <div class="rounded-xl bg-[#FAF6F0] border border-[#E6DACE] px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                              <div class="space-y-1 min-w-0">
+                                <div class="flex items-center gap-2 flex-wrap">
+                                  ${renderFamilyMemberPill(user, entry.assignedMemberId, { fallbackName: entry.assignedName })}
+                                  ${renderPastoralPill(entry.pastoral, { compact: true })}
+                                  <span class="text-xs font-extrabold text-[#3E2723]">${escapeHtml(entry.roleName)}</span>
+                                  ${
+                                    entry.isCoordShift
+                                      ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#3E2723] text-amber-300">
+                                          👑 Plantão
+                                        </span>`
+                                      : ''
+                                  }
+                                  ${
+                                    asg.substitutionRequested
+                                      ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 border border-red-300">
+                                          <i data-lucide="alert-circle" class="w-3 h-3"></i>
+                                          Substituição Solicitada
+                                        </span>`
+                                      : asg.substitutionAccepted
+                                        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                            <i data-lucide="check-circle-2" class="w-3 h-3"></i>
+                                            Substituição Confirmada
+                                          </span>`
+                                        : ''
+                                  }
+                                </div>
+                                ${
+                                  entry.hasConflict
+                                    ? `<p class="text-[11px] font-semibold text-amber-950 flex items-center gap-1">
+                                        <i data-lucide="clock-alert" class="w-3 h-3 text-[#B45309] shrink-0"></i>
+                                        Conflito amigável: ${escapeHtml(getFirstName(entry.assignedName))} possui outra escala neste horário.
+                                      </p>`
+                                    : ''
+                                }
+                                ${
+                                  asg.substitutionRequested && asg.substitutionReason
+                                    ? `<p class="text-[11px] text-red-800 bg-red-50 border border-red-200 rounded-lg px-2 py-1">
+                                        <strong>Motivo:</strong> ${escapeHtml(asg.substitutionReason)}
+                                      </p>`
+                                    : ''
+                                }
+                              </div>
+
+                              <div class="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                                ${
+                                  !isPast && !asg.substitutionRequested
+                                    ? `<button type="button" data-md-sub="${asg.id}" data-md-sch="${eSch.id}"
+                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-[#92400E] bg-white hover:bg-amber-50 border border-amber-300 transition">
+                                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                                        Solicitar Substituição
+                                      </button>`
+                                    : !isPast && asg.substitutionRequested
+                                      ? `<button type="button" data-md-cancel-sub="${asg.id}" data-md-sch="${eSch.id}"
+                                          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-[#5D4037] bg-white hover:bg-[#FAF6F0] border border-[#D7C4B2] transition">
+                                          <i data-lucide="x-circle" class="w-3.5 h-3.5 text-red-600"></i>
+                                          Cancelar Pedido
+                                        </button>`
+                                      : ''
+                                }
+                              </div>
+                            </div>
+                          `;
+                        })
+                        .join('')}
+                    </div>
+                  </article>
+                `;
+              }
+
+              // Card padrão marrom/dourado para Contas Individuais
+              const primary = entries[0];
+              const asg = primary.assignment;
               return `
                 <article class="bg-white rounded-2xl border-2 ${
                   isPast ? 'border-[#E6DACE] opacity-85' : 'user-schedule-card'
                 } p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 transition">
                   <div class="flex items-start gap-4 min-w-0">
-                    <!-- Bloco de Data + Contagem -->
                     <div class="w-16 sm:w-20 rounded-2xl ${
                       countdown.diffDays === 0
                         ? 'bg-[#D97706] text-white'
@@ -164,38 +334,30 @@ export function renderMyDatesContent(targetEl, { user, onChanged, onNotification
                           ${escapeHtml(countdown.label)}
                         </span>
                         ${
-                          isCoordShift
+                          primary.isCoordShift
                             ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-[#3E2723] text-amber-300 border border-amber-400/70">
                                 👑 Plantão de Coordenação
                               </span>`
                             : ''
                         }
-                        ${renderPastoralPill(pastoral, { compact: true })}
-                        ${
-                          isFam
-                            ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-[#3E2723] text-amber-300">
-                                <i data-lucide="user-check" class="w-3 h-3"></i>
-                                Escalado: ${escapeHtml(assignedName)}
-                              </span>`
-                            : ''
-                        }
+                        ${renderPastoralPill(primary.pastoral, { compact: true })}
                         ${
                           asg.substitutionRequested
                             ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-700 border border-red-300">
                                 <i data-lucide="alert-circle" class="w-3 h-3"></i>
                                 Substituição Solicitada
                               </span>`
-                            : asg.substitutionAccepted && asg.substitutedFromName
+                            : asg.substitutionAccepted
                               ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
                                   <i data-lucide="check-circle-2" class="w-3 h-3"></i>
-                                  Substituição Confirmada • Substituindo ${escapeHtml(getFirstName(asg.substitutedFromName))}
+                                  Substituição Confirmada
                                 </span>`
                               : ''
                         }
                       </div>
 
                       <h5 class="text-base font-extrabold text-[#3E2723]">
-                        ${escapeHtml(sch.celebrationType)} — <span class="text-[#B45309]">${escapeHtml(roleName)}</span>
+                        ${escapeHtml(sch.celebrationType)} — <span class="text-[#B45309]">${escapeHtml(entries.map((e) => e.roleName).join(' / '))}</span>
                       </h5>
 
                       <div class="flex items-center gap-3 flex-wrap text-xs text-[#6D4C41]">
@@ -207,10 +369,10 @@ export function renderMyDatesContent(targetEl, { user, onChanged, onNotification
                       </div>
 
                       ${
-                        hasConflict
+                        primary.hasConflict
                           ? `<div class="inline-flex items-center gap-1.5 mt-1 text-[11px] font-semibold text-amber-950 bg-amber-100 border border-amber-300 rounded-lg px-2.5 py-1">
                               <i data-lucide="clock-alert" class="w-3.5 h-3.5 text-[#B45309] shrink-0"></i>
-                              Conflito amigável: ${escapeHtml(getFirstName(assignedName))} possui outra escala neste mesmo dia e horário.
+                              Conflito amigável: ${escapeHtml(getFirstName(primary.assignedName))} possui outra escala neste mesmo dia e horário.
                             </div>`
                           : ''
                       }

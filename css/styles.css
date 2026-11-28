@@ -130,3 +130,75 @@ body {
     padding: 4px 2px;
   }
 }
+
+/* Diferenciação Visual Discreta por Integrante de Conta Familiar (tons terrosos/litúrgicos) */
+.family-member-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.2rem 0.625rem 0.2rem 0.25rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.family-member-pill-compact {
+  padding: 0.125rem 0.5rem 0.125rem 0.2rem;
+  font-size: 0.6875rem;
+}
+
+.family-member-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.125rem;
+  height: 1.125rem;
+  border-radius: 9999px;
+  font-size: 0.625rem;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.family-member-pill-compact .family-member-avatar {
+  width: 1rem;
+  height: 1rem;
+  font-size: 0.5625rem;
+}
+
+/* 1º Integrante — Dourado Suave */
+.family-member-pill-0 {
+  background-color: #FEF3C7;
+  color: #78350F;
+  border: 1px solid #F59E0B;
+}
+
+.family-member-pill-0 .family-member-avatar {
+  background-color: #F59E0B;
+  color: #FFFFFF;
+}
+
+/* 2º Integrante — Terracota / Vinho Suave */
+.family-member-pill-1 {
+  background-color: #FEE2E2;
+  color: #7F1D1D;
+  border: 1px solid #DC2626;
+}
+
+.family-member-pill-1 .family-member-avatar {
+  background-color: #DC2626;
+  color: #FFFFFF;
+}
+
+/* 3º Integrante — Verde Oliva Suave */
+.family-member-pill-2 {
+  background-color: #DCFCE7;
+  color: #14532D;
+  border: 1px solid #16A34A;
+}
+
+.family-member-pill-2 .family-member-avatar {
+  background-color: #16A34A;
+  color: #FFFFFF;
+}
