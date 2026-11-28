@@ -26,6 +26,29 @@ import {
 let selectedSessionId = null;
 let summaryPastoralFilter = 'all';
 
+function memberBelongsToPastoral(user, member, pastoralId) {
+  if (!pastoralId || pastoralId === 'all') return true;
+  if (Array.isArray(member?.pastoralIds) && member.pastoralIds.length > 0) {
+    return member.pastoralIds.includes(pastoralId);
+  }
+  if (member?.pastoralId) {
+    return member.pastoralId === pastoralId;
+  }
+  return getUserMemberships(user).some((ms) => ms.pastoralId === pastoralId);
+}
+
+function getMemberScopedMemberships(user, member, { generalAdmin, managedIds }) {
+  const accMemberships = getUserMemberships(user).filter((x) => generalAdmin || managedIds.has(x.pastoralId));
+  if (Array.isArray(member?.pastoralIds) && member.pastoralIds.length > 0) {
+    const set = new Set(member.pastoralIds);
+    return accMemberships.filter((x) => set.has(x.pastoralId));
+  }
+  if (member?.pastoralId) {
+    return accMemberships.filter((x) => x.pastoralId === member.pastoralId);
+  }
+  return accMemberships;
+}
+
 function buildAttendanceSessions(schedules, events, users, pastoralMap) {
   const userMap = Object.fromEntries(users.map((u) => [u.id, u]));
   const activeUsers = users.filter((u) => u.status === 'Ativo');
@@ -62,26 +85,33 @@ function buildAttendanceSessions(schedules, events, users, pastoralMap) {
   });
 
   events.forEach((evt) => {
+    const targetPid = evt.pastoralId;
+    const isAllPastorals = !targetPid || targetPid === 'all';
     const participants = [];
-    activeUsers
-      .filter((u) => evt.pastoralId === 'all' || getUserMemberships(u).some((m) => m.pastoralId === evt.pastoralId))
-      .forEach((u) => {
-        const isFam = isFamilyAccount(u);
-        getAccountMembers(u).forEach((m) => {
-          participants.push({
-            participantId: m.id,
-            userId: u.id,
-            name: m.name,
-            isFamily: isFam,
-          });
+    const seen = new Set();
+
+    activeUsers.forEach((u) => {
+      const isFam = isFamilyAccount(u);
+      getAccountMembers(u).forEach((m) => {
+        if (seen.has(m.id)) return;
+        if (!isAllPastorals && !memberBelongsToPastoral(u, m, targetPid)) return;
+        seen.add(m.id);
+        participants.push({
+          participantId: m.id,
+          userId: u.id,
+          name: m.name,
+          isFamily: isFam,
         });
       });
+    });
+
+    participants.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
 
     sessions.push({
       id: evt.id,
       kind: evt.type,
       pastoralId: evt.pastoralId,
-      pastoral: evt.pastoralId === 'all' ? null : pastoralMap[evt.pastoralId],
+      pastoral: isAllPastorals ? null : pastoralMap[evt.pastoralId],
       title: evt.title,
       date: evt.date,
       time: evt.time,
@@ -147,25 +177,27 @@ export function renderAttendance(container, { user, permissions }) {
       : managedSessions.filter((s) => s.pastoralId === summaryPastoralFilter);
   const summarySessionIds = summarySessions.map((s) => s.id);
 
-  // Desdobra contas em integrantes individuais para o indicador de frequência
+  // Desdobra contas em integrantes individuais para o indicador de frequência (filtro estrito por membro)
   const summaryParticipants = [];
+  const managedIdList = Array.from(managedIds);
   users.forEach((u) => {
     if (u.isGeneralAdmin) return;
-    const inScope =
-      summaryPastoralFilter !== 'all'
-        ? getUserMemberships(u).some((m) => m.pastoralId === summaryPastoralFilter)
-        : generalAdmin || getUserMemberships(u).some((m) => managedIds.has(m.pastoralId));
-    if (!inScope) return;
     const isFam = isFamilyAccount(u);
     getAccountMembers(u).forEach((m) => {
+      const inScope =
+        summaryPastoralFilter !== 'all'
+          ? memberBelongsToPastoral(u, m, summaryPastoralFilter)
+          : generalAdmin || managedIdList.some((pid) => memberBelongsToPastoral(u, m, pid));
+      if (!inScope) return;
       summaryParticipants.push({
         participantId: m.id,
         name: m.name,
         isFamily: isFam,
-        memberships: getUserMemberships(u).filter((x) => generalAdmin || managedIds.has(x.pastoralId)),
+        memberships: getMemberScopedMemberships(u, m, { generalAdmin, managedIds }),
       });
     });
   });
+  summaryParticipants.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
 
   container.innerHTML = `
     <div class="space-y-6">

@@ -232,3 +232,37 @@ body {
 .btn-volunteer-serve:hover {
   background-color: #92400E;
 }
+
+/* Destaque de Alto Contraste para Evento / Ensaio na Agenda */
+.agenda-legend-event {
+  background-color: #D97706;
+  color: #FFFFFF;
+  border: 1px solid #B45309;
+  font-weight: 700;
+}
+
+.agenda-legend-event-dot {
+  background-color: #FEF3C7;
+}
+
+.agenda-event-pill {
+  background-color: #FEF3C7;
+  color: #78350F;
+  border: 1px solid #F59E0B;
+  border-left: 4px solid #D97706;
+  font-weight: 700;
+}
+
+.agenda-event-card {
+  background-color: #FEF3C7;
+  border: 1px solid #F59E0B;
+  border-left: 4px solid #D97706;
+  color: #78350F;
+}
+
+.agenda-event-badge {
+  background-color: #D97706;
+  color: #FFFFFF;
+  border: 1px solid #B45309;
+  font-weight: 700;
+}

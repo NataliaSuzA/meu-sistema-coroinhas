@@ -67,7 +67,13 @@ export function renderAgenda(container, { user }) {
     itemsByDay[item.date].push(item);
   });
   Object.values(itemsByDay).forEach((arr) => {
-    arr.sort((a, b) => Number(b.isPersonalSchedule) - Number(a.isPersonalSchedule));
+    arr.sort((a, b) => {
+      const pDiff = Number(b.isPersonalSchedule) - Number(a.isPersonalSchedule);
+      if (pDiff !== 0) return pDiff;
+      const eDiff = Number(b.sourceType === 'event') - Number(a.sourceType === 'event');
+      if (eDiff !== 0) return eDiff;
+      return String(a.time || '').localeCompare(String(b.time || ''));
+    });
   });
 
   const personalMonthCount = monthItems.filter((i) => i.isPersonalSchedule).length;
@@ -97,7 +103,7 @@ export function renderAgenda(container, { user }) {
           return '<span class="w-1.5 h-1.5 rounded-full bg-[#D97706] ring-2 ring-amber-300/90 shrink-0" aria-hidden="true"></span>';
         }
         if (it.sourceType === 'event') {
-          return '<span class="w-1.5 h-1.5 rounded-full bg-[#5D4037] shrink-0" aria-hidden="true"></span>';
+          return '<span class="w-1.5 h-1.5 rounded-full bg-[#D97706] ring-1 ring-[#B45309] shrink-0" aria-hidden="true"></span>';
         }
         return '<span class="w-1.5 h-1.5 rounded-full bg-[#B8A394] shrink-0" aria-hidden="true"></span>';
       })
@@ -141,7 +147,7 @@ export function renderAgenda(container, { user }) {
             hasPersonal
               ? `<span class="text-[11px] leading-none text-[#D97706]" title="Você está escalado neste dia">★</span>`
               : hasEvent
-                ? `<span class="w-2 h-2 rounded-full bg-[#5D4037]" title="Evento / Ensaio"></span>`
+                ? `<span class="w-2.5 h-2.5 rounded-full bg-[#D97706] ring-2 ring-amber-300" title="Evento / Ensaio"></span>`
                 : dayItems.length > 0
                   ? `<span class="text-[10px] font-bold text-[#8D6E63]">${dayItems.length}</span>`
                   : ''
@@ -152,12 +158,12 @@ export function renderAgenda(container, { user }) {
             .slice(0, 2)
             .map((it) => {
               const cls = it.isPersonalSchedule
-                ? 'bg-[#3E2723] text-amber-300 border-[#B45309] font-extrabold shadow-2xs'
+                ? 'bg-[#3E2723] text-amber-300 border border-[#B45309] font-extrabold shadow-2xs'
                 : it.sourceType === 'event'
-                  ? 'bg-amber-50 text-[#4E342E] border-amber-300 font-semibold'
-                  : 'bg-[#F5EFE6]/85 text-[#6D4C41] border-[#E6DACE] font-medium';
+                  ? 'agenda-event-pill shadow-2xs'
+                  : 'bg-[#F5EFE6]/85 text-[#6D4C41] border border-[#E6DACE] font-medium';
               return `
-                <div class="truncate text-[10px] px-1.5 py-0.5 rounded border ${cls}" title="${escapeHtml(it.shortTag)}">
+                <div class="truncate text-[10px] px-1.5 py-0.5 rounded ${cls}" title="${escapeHtml(it.shortTag)}">
                   ${escapeHtml(it.shortTag)}
                 </div>
               `;
@@ -209,8 +215,8 @@ export function renderAgenda(container, { user }) {
             <span class="w-2 h-2 rounded-full bg-[#8D6E63]"></span>
             Missa da Pastoral (${pastoralMonthCount})
           </span>
-          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-semibold bg-amber-50 text-[#78350F] border border-amber-300">
-            <span class="w-2 h-2 rounded-full bg-[#B45309]"></span>
+          <span class="agenda-legend-event inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full shadow-2xs">
+            <span class="agenda-legend-event-dot w-2 h-2 rounded-full shrink-0"></span>
             Evento / Ensaio
           </span>
         </div>
@@ -365,27 +371,37 @@ export function renderAgenda(container, { user }) {
                       : renderPastoralPill(it.pastoral, { compact: true });
 
                     return `
-                      <article class="rounded-xl border ${
-                        isEvt ? 'border-amber-300 bg-amber-50/40' : 'border-[#E6DACE] bg-[#FDFBF7]/90'
+                      <article class="rounded-xl ${
+                        isEvt ? 'agenda-event-card shadow-xs' : 'border border-[#E6DACE] bg-[#FDFBF7]/90'
                       } p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div class="space-y-1.5">
                           <div class="flex items-center gap-2 flex-wrap">
-                            <span class="text-xs font-bold text-[#4E342E] bg-white px-2.5 py-0.5 rounded-lg border border-[#E6DACE]">
+                            <span class="text-xs font-bold ${
+                              isEvt
+                                ? 'text-[#78350F] bg-white/95 border border-[#F59E0B]'
+                                : 'text-[#4E342E] bg-white border border-[#E6DACE]'
+                            } px-2.5 py-0.5 rounded-lg">
                               ${escapeHtml(formatDateBR(it.date))} • ${escapeHtml(it.time)}
                             </span>
                             ${pastoralBadges}
-                            <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                            <span class="text-[10px] uppercase tracking-wider px-2.5 py-0.5 rounded-full ${
                               isEvt
-                                ? 'bg-[#4E342E] text-amber-200'
-                                : 'bg-[#F5EFE6] text-[#6D4C41] border border-[#E6DACE]'
+                                ? 'agenda-event-badge'
+                                : 'font-bold bg-[#F5EFE6] text-[#6D4C41] border border-[#E6DACE]'
                             }">
                               ${escapeHtml(it.eventType)}
                             </span>
                           </div>
-                          <h5 class="text-sm font-bold text-[#4E342E]">
-                            ${escapeHtml(it.time)} • ${escapeHtml(it.location)}${it.pastoralLabels ? ` (${escapeHtml(it.pastoralLabels)})` : ''} — <span class="font-semibold text-[#6D4C41]">${escapeHtml(it.title.split(' • ')[0])}</span>
-                          </h5>
-                          <p class="text-xs text-[#8D6E63] flex items-center gap-2 flex-wrap">
+                          ${
+                            isEvt
+                              ? `<h5 class="text-sm font-extrabold text-[#78350F]">
+                                  ${escapeHtml(it.time)} — ${escapeHtml(it.title)} <span class="font-bold text-[#92400E]">• ${escapeHtml(it.location)}</span>
+                                </h5>`
+                              : `<h5 class="text-sm font-bold text-[#4E342E]">
+                                  ${escapeHtml(it.time)} • ${escapeHtml(it.location)}${it.pastoralLabels ? ` (${escapeHtml(it.pastoralLabels)})` : ''} — <span class="font-semibold text-[#6D4C41]">${escapeHtml(it.title.split(' • ')[0])}</span>
+                                </h5>`
+                          }
+                          <p class="text-xs ${isEvt ? 'text-[#92400E] font-medium' : 'text-[#8D6E63]'} flex items-center gap-2 flex-wrap">
                             <span class="capitalize">${escapeHtml(formatWeekdayBR(it.date))}</span>
                             ${it.description ? `<span>•</span><span>${escapeHtml(it.description)}</span>` : ''}
                           </p>
@@ -395,10 +411,10 @@ export function renderAgenda(container, { user }) {
                           it.canEdit && isEvt
                             ? `
                           <div class="flex items-center gap-1 shrink-0">
-                            <button type="button" data-edit-event="${it.sourceId}" class="p-2 rounded-lg text-[#6D4C41] hover:text-[#3E2723] hover:bg-white transition" title="Editar evento">
+                            <button type="button" data-edit-event="${it.sourceId}" class="p-2 rounded-lg text-[#78350F] hover:text-[#3E2723] hover:bg-white/80 transition" title="Editar evento">
                               <i data-lucide="pencil" class="w-4 h-4"></i>
                             </button>
-                            <button type="button" data-delete-event="${it.sourceId}" class="p-2 rounded-lg text-[#6D4C41] hover:text-red-700 hover:bg-white transition" title="Excluir evento">
+                            <button type="button" data-delete-event="${it.sourceId}" class="p-2 rounded-lg text-[#78350F] hover:text-red-700 hover:bg-white/80 transition" title="Excluir evento">
                               <i data-lucide="trash-2" class="w-4 h-4"></i>
                             </button>
                           </div>
