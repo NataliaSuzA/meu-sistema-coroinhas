@@ -104,6 +104,27 @@ export function setSchedulesTab(tabId) {
   activeTab = tabId || 'my_dates';
 }
 
+export function openSchedulesWithOpenVacancies({ user, pastoralId = 'all', pastorals = [] } = {}) {
+  const accessibleIds = getMemberPastoralIds(user, pastorals);
+  if (pastoralId && pastoralId !== 'all' && accessibleIds.includes(pastoralId)) {
+    activeTab = pastoralId;
+  } else if (isGeneralAdmin(user)) {
+    activeTab = 'all_managed';
+  } else {
+    const schedules = dataService.getSchedules();
+    const todayISO = getTodayISO();
+    const firstWithVacancy = accessibleIds.find((pid) =>
+      schedules.some(
+        (s) =>
+          s.date >= todayISO &&
+          (s.vagasAbertas || []).some((v) => v && v.pastoralId === pid && Number(v.quantidade) > 0),
+      ),
+    );
+    activeTab = firstWithVacancy || accessibleIds[0] || 'my_dates';
+  }
+  onlyOpenVacanciesFilter = true;
+}
+
 export function renderSchedules(container, { user, setHeaderContext, permissions, openLiturgyFor, onNotificationsChanged }) {
   const pastorals = dataService.getPastorals();
   const pastoralMap = Object.fromEntries(pastorals.map((p) => [p.id, p]));

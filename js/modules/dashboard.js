@@ -8,7 +8,11 @@
  */
 
 import { dataService } from '../services/dataService.js';
-import { openAcceptSubstitutionModal, openClaimVacancyModal } from './schedules.js';
+import {
+  openAcceptSubstitutionModal,
+  openClaimVacancyModal,
+  openSchedulesWithOpenVacancies,
+} from './schedules.js';
 import {
   buildUserTimeSlotIndex,
   canManagePastoral,
@@ -212,51 +216,74 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
       });
     });
 
+  const MAX_DASHBOARD_OPPORTUNITIES = 4;
+  const displayedOpportunities = openOpportunities.slice(0, MAX_DASHBOARD_OPPORTUNITIES);
+  const hasMoreOpportunities = openOpportunities.length > MAX_DASHBOARD_OPPORTUNITIES;
+
   const openOpportunitiesHtml =
     openOpportunities.length > 0
       ? `
-      <section id="dashboard-open-vacancies" class="rounded-2xl bg-white border border-amber-300/90 p-4 sm:p-5 space-y-3 shadow-xs">
-        <div class="flex items-center justify-between gap-2 flex-wrap">
+      <section id="dashboard-open-vacancies" class="bg-white rounded-2xl border border-amber-300/90 shadow-xs overflow-hidden">
+        <div class="px-5 sm:px-6 py-4 border-b border-amber-200/80 flex items-center justify-between gap-3 flex-wrap bg-gradient-to-r from-amber-50/70 to-[#FDFBF7]">
           <div class="flex items-center gap-2.5">
-            <div class="w-9 h-9 rounded-xl bg-amber-100 text-[#B45309] border border-amber-300 flex items-center justify-center shrink-0">
+            <div class="w-8 h-8 rounded-lg bg-amber-100 text-[#B45309] border border-amber-300 flex items-center justify-center shrink-0">
               <i data-lucide="sparkles" class="w-4 h-4"></i>
             </div>
             <div>
-              <h4 class="text-sm font-extrabold text-[#3E2723]">Oportunidades para Servir (${openOpportunities.length})</h4>
-              <p class="text-xs text-[#6D4C41]">Celebrações próximas com vagas em aberto na sua pastoral. Pode ajudar no altar?</p>
+              <h4 class="text-base font-bold text-[#3E2723]">Oportunidades para Servir (${openOpportunities.length})</h4>
+              <p class="text-xs text-[#6D4C41]">Próximas ${displayedOpportunities.length} celebrações com vagas abertas na sua pastoral</p>
             </div>
           </div>
-          <button type="button" data-nav="schedules" class="text-xs font-bold text-[#B45309] hover:text-[#3E2723] transition">
-            Ver em Escalas →
+          <button type="button" data-open-vacancies-schedules
+            class="text-xs font-bold text-[#B45309] hover:text-[#3E2723] inline-flex items-center gap-1 transition">
+            ${
+              hasMoreOpportunities
+                ? `Ver todas as ${openOpportunities.length} oportunidades →`
+                : 'Ver em Escalas →'
+            }
           </button>
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          ${openOpportunities
-            .slice(0, 6)
-            .map(({ schedule: sch, vacancy, pastoral, eligible }) => `
-              <div class="vacancy-row-card rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div class="space-y-1 min-w-0">
-                  <div class="flex items-center gap-1.5 flex-wrap">
-                    <span class="vacancy-pill">${escapeHtml(formatVacancyBadgeText(vacancy, pastoralMap))}</span>
-                    ${renderPastoralPill(pastoral, { compact: true })}
+        <div class="p-4 sm:p-6 space-y-4">
+          <div class="dashboard-vacancy-grid grid grid-cols-1 md:grid-cols-2 gap-3">
+            ${displayedOpportunities
+              .map(({ schedule: sch, vacancy, pastoral, eligible }) => `
+                <div class="vacancy-row-card dashboard-vacancy-item rounded-xl p-3 sm:p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
+                  <div class="space-y-1 min-w-0">
+                    <div class="flex items-center gap-1.5 flex-wrap">
+                      <span class="vacancy-pill">${escapeHtml(formatVacancyBadgeText(vacancy, pastoralMap))}</span>
+                      ${renderPastoralPill(pastoral, { compact: true })}
+                    </div>
+                    <p class="text-xs font-bold text-[#3E2723]">
+                      ${escapeHtml(formatDateBR(sch.date))} (${escapeHtml(formatWeekdayBR(sch.date))}) às ${escapeHtml(sch.time)}
+                    </p>
+                    <p class="text-[11px] text-[#6D4C41] truncate">${escapeHtml(sch.celebrationType)} — ${escapeHtml(sch.location)}</p>
                   </div>
-                  <p class="text-xs font-bold text-[#3E2723]">
-                    ${escapeHtml(formatDateBR(sch.date))} (${escapeHtml(formatWeekdayBR(sch.date))}) às ${escapeHtml(sch.time)}
-                  </p>
-                  <p class="text-[11px] text-[#6D4C41]">${escapeHtml(sch.celebrationType)} — ${escapeHtml(sch.location)}</p>
+                  ${
+                    eligible.length > 0
+                      ? `<button type="button" data-dash-claim-vac="${vacancy.id}" data-dash-vac-sch="${sch.id}"
+                          class="btn-volunteer-serve shrink-0 self-start sm:self-center inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs font-extrabold shadow-xs transition">
+                          🙋‍♂️ Me Oferecer para Servir
+                        </button>`
+                      : ''
+                  }
                 </div>
-                ${
-                  eligible.length > 0
-                    ? `<button type="button" data-dash-claim-vac="${vacancy.id}" data-dash-vac-sch="${sch.id}"
-                        class="btn-volunteer-serve shrink-0 self-start sm:self-center inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-extrabold shadow-xs transition">
-                        🙋‍♂️ Me Oferecer para Servir
-                      </button>`
-                    : ''
-                }
-              </div>
-            `)
-            .join('')}
+              `)
+              .join('')}
+          </div>
+
+          ${
+            hasMoreOpportunities
+              ? `
+            <div class="pt-3 border-t border-amber-200/70 flex items-center justify-center sm:justify-end">
+              <button type="button" data-open-vacancies-schedules
+                class="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-[#92400E] border border-amber-300 text-xs font-extrabold transition">
+                Ver todas as ${openOpportunities.length} oportunidades em Escalas →
+              </button>
+            </div>
+          `
+              : ''
+          }
         </div>
       </section>
     `
@@ -364,13 +391,8 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
 
   container.innerHTML = `
     <div class="space-y-6">
-      ${reminderBannersHtml}
-      ${openSubstitutionsBannerHtml}
-      ${openOpportunitiesHtml}
-      ${birthdayBannerHtml}
-
-      <!-- Cabeçalho Interno Dinâmico + Filtro de Pastoral -->
-      <div class="bg-[#FDFBF7] rounded-2xl border border-[#E6DACE] p-5 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+      <!-- 1º Cabeçalho de Boas-Vindas ("Paz e bem, [Nome]!") + Filtro de Pastoral -->
+      <div id="dashboard-welcome-header" class="bg-[#FDFBF7] rounded-2xl border border-[#E6DACE] p-5 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div class="space-y-2">
           <div class="flex items-center gap-2 flex-wrap">
             <span class="inline-flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider text-[#B45309] bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full">
@@ -437,6 +459,8 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
       </div>
 
       <!-- Mural de Avisos Ativos no Início (Isolado por Pastoral e Filtrado por Validade) -->
+      ${reminderBannersHtml}
+      ${birthdayBannerHtml}
       ${
         dashboardNotices.length > 0
           ? `
@@ -587,8 +611,8 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
         }
       </div>
 
-      <!-- Widget: Minhas Próximas Escalas -->
-      <section class="bg-white rounded-2xl border border-[#E6DACE] shadow-xs overflow-hidden">
+      <!-- 4º Widget: Minhas Próximas Escalas -->
+      <section id="dashboard-my-upcoming-schedules" class="bg-white rounded-2xl border border-[#E6DACE] shadow-xs overflow-hidden">
         <div class="px-6 py-4 border-b border-[#E6DACE]/80 flex items-center justify-between gap-3 bg-[#FDFBF7]">
           <div class="flex items-center gap-2.5">
             <div class="w-8 h-8 rounded-lg bg-[#3E2723] text-amber-400 flex items-center justify-center">
@@ -683,6 +707,10 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
           }
         </div>
       </section>
+
+      <!-- 5º Card: Oportunidades para Servir (posicionado abaixo de Minhas Próximas Escalas) -->
+      ${openOpportunitiesHtml}
+      ${openSubstitutionsBannerHtml}
     </div>
   `;
 
@@ -714,6 +742,17 @@ export function renderDashboard(container, { user, navigate, setHeaderContext, p
       dataService.markNotificationRead(btn.dataset.reminderId);
       onNotificationsChanged?.();
       openFormDirectly?.(btn.dataset.answerReminderForm);
+    });
+  });
+
+  container.querySelectorAll('[data-open-vacancies-schedules]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      openSchedulesWithOpenVacancies({
+        user,
+        pastoralId: dashboardPastoralFilter,
+        pastorals,
+      });
+      navigate('schedules', { preserveSchedulesTab: true });
     });
   });
 

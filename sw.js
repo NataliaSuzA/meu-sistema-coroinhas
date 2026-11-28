@@ -1,8 +1,8 @@
 /**
- * Service Worker v21 — Gestão Pastoral - Paróquia Santa Teresa d'Ávila (Cloud Firestore)
+ * Service Worker v22 — Gestão Pastoral - Paróquia Santa Teresa d'Ávila (Cloud Firestore)
  */
 
-const CACHE_NAME = 'santa-teresa-pastoral-v21';
+const CACHE_NAME = 'santa-teresa-pastoral-v22';
 const CORE_ASSETS = [
   './',
   './index.html',

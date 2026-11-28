@@ -266,3 +266,19 @@ body {
   border: 1px solid #B45309;
   font-weight: 700;
 }
+
+/* Lista compacta de Oportunidades para Servir no Início (Mobile) */
+@media (max-width: 767px) {
+  .dashboard-vacancy-grid {
+    gap: 0.625rem;
+  }
+
+  .dashboard-vacancy-item {
+    padding: 0.65rem 0.75rem;
+  }
+
+  .dashboard-vacancy-item .vacancy-pill {
+    font-size: 0.6875rem;
+    padding: 0.18rem 0.5rem;
+  }
+}
