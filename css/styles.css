@@ -314,3 +314,34 @@ body {
     padding: 0.18rem 0.5rem;
   }
 }
+
+/* Filtros Rápidos na Tela de Presença */
+.attendance-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background-color: #FFFFFF;
+  color: #5D4037;
+  border: 1px solid #E6DACE;
+  transition: all 0.15s ease;
+}
+
+.attendance-filter-pill:hover {
+  background-color: #FAF6F0;
+  border-color: #D7C4B2;
+}
+
+.attendance-filter-pill-active {
+  background-color: #3E2723;
+  color: #FEF3C7;
+  border-color: #3E2723;
+}
+
+.attendance-filter-pill-active:hover {
+  background-color: #4E342E;
+  border-color: #4E342E;
+}

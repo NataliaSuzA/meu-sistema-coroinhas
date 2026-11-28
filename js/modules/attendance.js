@@ -7,11 +7,15 @@
 
 import { dataService } from '../services/dataService.js';
 import {
+  MONTHS_PT,
+  addDaysToTodayISO,
   canManagePastoral,
   escapeHtml,
   formatDateBR,
+  formatWeekdayBR,
   getAccountMembers,
   getCoordinatedPastoralIds,
+  getTodayISO,
   getUserMemberships,
   hasPermission,
   isFamilyAccount,
@@ -24,6 +28,9 @@ import {
 } from '../utils/helpers.js';
 
 let selectedSessionId = null;
+let sessionPastoralFilter = 'all';
+let sessionPeriodFilter = 'all';
+let sessionDateFilter = '';
 let summaryPastoralFilter = 'all';
 
 function memberBelongsToPastoral(user, member, pastoralId) {
@@ -71,10 +78,14 @@ function buildAttendanceSessions(schedules, events, users, pastoralMap) {
     });
 
     const p = pastoralMap[sch.pastoralId];
+    const pastoralIds = Array.from(
+      new Set([sch.pastoralId, ...(sch.assignments || []).map((a) => a.pastoralId)].filter(Boolean)),
+    );
     sessions.push({
       id: sch.id,
       kind: 'Missa / Escala',
       pastoralId: sch.pastoralId,
+      pastoralIds,
       pastoral: p,
       title: `${sch.celebrationType} — ${sch.location}`,
       date: sch.date,
@@ -111,6 +122,7 @@ function buildAttendanceSessions(schedules, events, users, pastoralMap) {
       id: evt.id,
       kind: evt.type,
       pastoralId: evt.pastoralId,
+      pastoralIds: isAllPastorals ? ['all'] : [evt.pastoralId],
       pastoral: isAllPastorals ? null : pastoralMap[evt.pastoralId],
       title: evt.title,
       date: evt.date,
@@ -120,7 +132,31 @@ function buildAttendanceSessions(schedules, events, users, pastoralMap) {
     });
   });
 
-  return sessions.sort((a, b) => `${b.date}T${b.time}`.localeCompare(`${a.date}T${a.time}`));
+  return sessions.sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`));
+}
+
+function partitionAndSortSessions(sessions, todayISO) {
+  const upcoming = sessions
+    .filter((s) => s.date >= todayISO)
+    .sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`));
+  const past = sessions
+    .filter((s) => s.date < todayISO)
+    .sort((a, b) => `${b.date}T${b.time}`.localeCompare(`${a.date}T${a.time}`));
+  return { upcoming, past };
+}
+
+function pickDefaultSession(upcoming, past, todayISO) {
+  const todayMatch = upcoming.find((s) => s.date === todayISO);
+  if (todayMatch) return todayMatch;
+  if (upcoming.length > 0) return upcoming[0];
+  if (past.length > 0) return past[0];
+  return null;
+}
+
+function formatMonthPeriodLabel(ym) {
+  const [y, m] = String(ym || '').split('-').map(Number);
+  if (!y || !m || !MONTHS_PT[m - 1]) return ym;
+  return `${MONTHS_PT[m - 1]}/${y}`;
 }
 
 function computeParticipantStats(participantId, allowedSessionIds, attendanceMap) {
@@ -157,19 +193,96 @@ export function renderAttendance(container, { user, permissions }) {
     return;
   }
 
+  const todayISO = getTodayISO();
+  const weekEndISO = addDaysToTodayISO(7);
   const managedIds = new Set(getCoordinatedPastoralIds(user, pastorals));
   const managedPastorals = pastorals.filter((p) => managedIds.has(p.id));
-  const managedSessions = allSessions.filter((s) => generalAdmin || canManagePastoral(user, s.pastoralId));
+  const managedSessions = allSessions.filter(
+    (s) =>
+      generalAdmin ||
+      canManagePastoral(user, s.pastoralId) ||
+      (s.pastoralIds || []).some((pid) => canManagePastoral(user, pid)),
+  );
 
-  if (!selectedSessionId || !managedSessions.some((s) => s.id === selectedSessionId)) {
-    selectedSessionId = managedSessions[0]?.id || null;
+  // Pastorais disponíveis na barra de filtros (apenas as gerenciadas com sessões ou Coroinhas/Acólitos)
+  const sessionPastoralIdsPresent = new Set();
+  managedSessions.forEach((s) => {
+    (s.pastoralIds || []).forEach((pid) => {
+      if (pid && pid !== 'all') sessionPastoralIdsPresent.add(pid);
+    });
+  });
+  const filterablePastorals = managedPastorals.filter(
+    (p) => sessionPastoralIdsPresent.has(p.id) || managedPastorals.length <= 3,
+  );
+
+  if (sessionPastoralFilter !== 'all' && !managedIds.has(sessionPastoralFilter)) {
+    sessionPastoralFilter = 'all';
   }
   if (summaryPastoralFilter !== 'all' && !managedIds.has(summaryPastoralFilter)) {
     summaryPastoralFilter = 'all';
   }
 
-  const activeSession = managedSessions.find((s) => s.id === selectedSessionId) || null;
+  // Meses disponíveis ordenados cronologicamente para o seletor de período
+  const availableMonths = Array.from(
+    new Set(managedSessions.map((s) => String(s.date || '').slice(0, 7)).filter((ym) => /^\d{4}-\d{2}$/.test(ym))),
+  ).sort();
+  if (
+    sessionPeriodFilter !== 'all' &&
+    sessionPeriodFilter !== 'this_week' &&
+    !availableMonths.includes(sessionPeriodFilter)
+  ) {
+    sessionPeriodFilter = 'all';
+  }
+
+  // Aplica filtros rápidos (Pastoral, Período/Mês e Data específica)
+  const filteredSessions = managedSessions.filter((s) => {
+    if (sessionPastoralFilter !== 'all') {
+      const matchesPastoral =
+        s.pastoralId === sessionPastoralFilter ||
+        s.pastoralId === 'all' ||
+        (s.pastoralIds || []).includes(sessionPastoralFilter);
+      if (!matchesPastoral) return false;
+    }
+    if (sessionDateFilter) {
+      return s.date === sessionDateFilter;
+    }
+    if (sessionPeriodFilter === 'this_week') {
+      return s.date >= todayISO && s.date <= weekEndISO;
+    }
+    if (sessionPeriodFilter !== 'all') {
+      return String(s.date || '').startsWith(sessionPeriodFilter);
+    }
+    return true;
+  });
+
+  const { upcoming: upcomingSessions, past: pastSessions } = partitionAndSortSessions(filteredSessions, todayISO);
+  const orderedFilteredSessions = [...upcomingSessions, ...pastSessions];
+
+  if (!selectedSessionId || !orderedFilteredSessions.some((s) => s.id === selectedSessionId)) {
+    selectedSessionId = pickDefaultSession(upcomingSessions, pastSessions, todayISO)?.id || null;
+  }
+
+  const activeSession = orderedFilteredSessions.find((s) => s.id === selectedSessionId) || null;
   const sessionRecord = activeSession ? attendanceMap[activeSession.id] || {} : {};
+  const hasActiveSessionFilter =
+    sessionPastoralFilter !== 'all' || sessionPeriodFilter !== 'all' || Boolean(sessionDateFilter);
+
+  const renderSessionOption = (s) => {
+    const pLabel = s.pastoral?.shortName || 'Geral';
+    const todayPrefix = s.date === todayISO ? '★ HOJE • ' : '';
+    return `<option value="${s.id}" ${s.id === selectedSessionId ? 'selected' : ''}>${todayPrefix}${formatDateBR(s.date)} ${s.time} • [${pLabel}] ${escapeHtml(s.title)}</option>`;
+  };
+
+  const sessionSelectOptionsHtml = [
+    upcomingSessions.length > 0
+      ? `<optgroup label="Hoje e Próximas (${upcomingSessions.length})">${upcomingSessions.map(renderSessionOption).join('')}</optgroup>`
+      : '',
+    pastSessions.length > 0
+      ? `<optgroup label="Anteriores (${pastSessions.length})">${pastSessions.map(renderSessionOption).join('')}</optgroup>`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('');
 
   const summarySessions =
     summaryPastoralFilter === 'all'
@@ -214,39 +327,123 @@ export function renderAttendance(container, { user, permissions }) {
 
       <!-- Chamada da Sessão -->
       <section class="bg-white rounded-2xl border border-[#E6DACE] shadow-xs overflow-hidden">
-        <div class="px-6 py-4 bg-[#3E2723] text-white flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div>
-            <p class="text-[11px] font-bold uppercase tracking-wider text-amber-400">Lista de Chamada</p>
-            <h4 class="text-base font-bold mt-0.5">Registrar presença por celebração ou ensaio</h4>
+        <div class="px-5 sm:px-6 py-4 bg-[#3E2723] text-white space-y-3">
+          <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div>
+              <p class="text-[11px] font-bold uppercase tracking-wider text-amber-400">Lista de Chamada</p>
+              <h4 class="text-base font-bold mt-0.5">Registrar presença por celebração ou ensaio</h4>
+            </div>
+            ${
+              orderedFilteredSessions.length > 0
+                ? `
+              <div class="flex items-center gap-2 w-full lg:w-auto">
+                <select id="attendance-session-select" aria-label="Selecionar celebração ou evento"
+                  class="flex-1 lg:w-[400px] max-w-full px-3.5 py-2 rounded-xl bg-[#2B1B18] border border-amber-500/35 text-white text-xs sm:text-sm font-semibold outline-none focus:border-amber-400">
+                  ${sessionSelectOptionsHtml}
+                </select>
+                <span class="hidden sm:inline-flex items-center px-2.5 py-1.5 rounded-lg bg-white/10 text-amber-200 text-[11px] font-bold shrink-0">
+                  ${orderedFilteredSessions.length} ${orderedFilteredSessions.length === 1 ? 'opção' : 'opções'}
+                </span>
+              </div>
+            `
+                : `
+              <span class="text-xs font-semibold text-amber-200/90 bg-white/10 px-3 py-1.5 rounded-xl self-start lg:self-center">
+                Nenhuma celebração encontrada no filtro
+              </span>
+            `
+            }
           </div>
-          ${
-            managedSessions.length > 0
-              ? `
-            <select id="attendance-session-select"
-              class="px-3.5 py-2 rounded-xl bg-[#2B1B18] border border-amber-500/30 text-white text-xs sm:text-sm font-semibold outline-none focus:border-amber-400 max-w-md">
-              ${managedSessions
-                .map((s) => {
-                  const pLabel = s.pastoral?.shortName || 'Geral';
-                  return `<option value="${s.id}" ${s.id === selectedSessionId ? 'selected' : ''}>${formatDateBR(s.date)} ${s.time} • [${pLabel}] ${escapeHtml(s.title)}</option>`;
-                })
+        </div>
+
+        <!-- Barra Compacta de Filtros Rápidos -->
+        <div id="attendance-filters-bar" class="attendance-filter-bar px-5 sm:px-6 py-3 bg-[#FDFBF7] border-b border-[#E6DACE]/80 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+          <!-- Filtro de Pastoral (Pílulas) -->
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-[#8D6E63] mr-1">Pastoral:</span>
+            ${
+              filterablePastorals.length > 1 || generalAdmin
+                ? `
+              <button type="button" data-att-pastoral="all"
+                class="attendance-filter-pill ${sessionPastoralFilter === 'all' ? 'attendance-filter-pill-active' : ''}">
+                Todas
+              </button>
+            `
+                : ''
+            }
+            ${filterablePastorals
+              .map(
+                (p) => `
+              <button type="button" data-att-pastoral="${p.id}"
+                class="attendance-filter-pill ${sessionPastoralFilter === p.id ? 'attendance-filter-pill-active' : ''}">
+                <span class="w-1.5 h-1.5 rounded-full shrink-0" style="background-color: ${sessionPastoralFilter === p.id ? '#FEF3C7' : escapeHtml(p.color || '#B45309')};"></span>
+                ${escapeHtml(p.shortName)}
+              </button>
+            `,
+              )
+              .join('')}
+          </div>
+
+          <!-- Filtro de Mês / Período + Data Específica -->
+          <div class="flex items-center gap-2 flex-wrap">
+            <select id="attendance-period-filter" aria-label="Filtrar por período ou mês"
+              class="px-3 py-1.5 rounded-xl border border-[#E6DACE] bg-white text-xs font-bold text-[#3E2723] outline-none focus:border-[#B45309]">
+              <option value="all" ${sessionPeriodFilter === 'all' && !sessionDateFilter ? 'selected' : ''}>Todos os períodos</option>
+              <option value="this_week" ${sessionPeriodFilter === 'this_week' && !sessionDateFilter ? 'selected' : ''}>Esta Semana</option>
+              ${availableMonths
+                .map(
+                  (ym) =>
+                    `<option value="${ym}" ${sessionPeriodFilter === ym && !sessionDateFilter ? 'selected' : ''}>${escapeHtml(formatMonthPeriodLabel(ym))}</option>`,
+                )
                 .join('')}
             </select>
-          `
-              : ''
-          }
+
+            <div class="inline-flex items-center gap-1.5 bg-white border border-[#E6DACE] rounded-xl px-2.5 py-1">
+              <i data-lucide="calendar" class="w-3.5 h-3.5 text-[#B45309] shrink-0"></i>
+              <input id="attendance-date-filter" type="date" value="${escapeHtml(sessionDateFilter)}" aria-label="Filtrar por data específica"
+                class="text-xs font-bold text-[#3E2723] bg-transparent outline-none">
+            </div>
+
+            ${
+              hasActiveSessionFilter
+                ? `
+              <button id="attendance-clear-filters" type="button"
+                class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold text-[#92400E] bg-amber-50 hover:bg-amber-100 border border-amber-300 transition">
+                <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                Limpar
+              </button>
+            `
+                : ''
+            }
+          </div>
         </div>
 
         <div class="p-5">
           ${
-            !activeSession || activeSession.participants.length === 0
-              ? `<p class="text-sm text-[#8D6E63] text-center py-6">Nenhuma celebração ou ensaio com membros vinculado às pastorais que você coordena.</p>`
-              : `
+            !activeSession
+              ? `
+            <div class="text-center py-8 space-y-2.5">
+              <p class="text-sm font-semibold text-[#6D4C41]">Nenhuma celebração ou ensaio encontrado para os filtros selecionados.</p>
+              ${
+                hasActiveSessionFilter
+                  ? `<button type="button" id="attendance-empty-clear" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-[#3E2723] hover:bg-[#5D4037] text-white transition">Limpar filtros</button>`
+                  : ''
+              }
+            </div>
+          `
+              : activeSession.participants.length === 0
+                ? `<p class="text-sm text-[#8D6E63] text-center py-6">Nenhum integrante vinculado a esta celebração ou ensaio.</p>`
+                : `
             <div class="mb-4 flex items-center justify-between flex-wrap gap-2 text-xs text-[#6D4C41]">
               <div class="flex items-center gap-2 flex-wrap">
                 ${renderPastoralPill(activeSession.pastoral, { compact: true })}
-                <span><strong>Local:</strong> ${escapeHtml(activeSession.location)} • <strong>Data:</strong> ${formatDateBR(activeSession.date)} às ${escapeHtml(activeSession.time)}</span>
+                ${
+                  activeSession.date === todayISO
+                    ? `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#D97706] text-white">HOJE</span>`
+                    : ''
+                }
+                <span><strong>Local:</strong> ${escapeHtml(activeSession.location)} • <strong>Data:</strong> ${formatDateBR(activeSession.date)} (${escapeHtml(formatWeekdayBR(activeSession.date))}) às ${escapeHtml(activeSession.time)}</span>
               </div>
-              <span>${activeSession.participants.length} integrantes na chamada</span>
+              <span class="font-bold text-[#3E2723]">${activeSession.participants.length} ${activeSession.participants.length === 1 ? 'integrante' : 'integrantes'} na chamada</span>
             </div>
             <div class="divide-y divide-[#E6DACE]/70 border border-[#E6DACE] rounded-xl overflow-hidden">
               ${activeSession.participants
@@ -378,6 +575,38 @@ export function renderAttendance(container, { user, permissions }) {
     selectedSessionId = e.target.value;
     renderAttendance(container, { user, permissions });
   });
+
+  container.querySelectorAll('[data-att-pastoral]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      sessionPastoralFilter = btn.dataset.attPastoral || 'all';
+      selectedSessionId = null;
+      renderAttendance(container, { user, permissions });
+    });
+  });
+
+  container.querySelector('#attendance-period-filter')?.addEventListener('change', (e) => {
+    sessionPeriodFilter = e.target.value || 'all';
+    sessionDateFilter = '';
+    selectedSessionId = null;
+    renderAttendance(container, { user, permissions });
+  });
+
+  container.querySelector('#attendance-date-filter')?.addEventListener('change', (e) => {
+    sessionDateFilter = e.target.value || '';
+    if (sessionDateFilter) sessionPeriodFilter = 'all';
+    selectedSessionId = null;
+    renderAttendance(container, { user, permissions });
+  });
+
+  const resetSessionFilters = () => {
+    sessionPastoralFilter = 'all';
+    sessionPeriodFilter = 'all';
+    sessionDateFilter = '';
+    selectedSessionId = null;
+    renderAttendance(container, { user, permissions });
+  };
+  container.querySelector('#attendance-clear-filters')?.addEventListener('click', resetSessionFilters);
+  container.querySelector('#attendance-empty-clear')?.addEventListener('click', resetSessionFilters);
 
   container.querySelector('#attendance-pastoral-filter')?.addEventListener('change', (e) => {
     summaryPastoralFilter = e.target.value;
