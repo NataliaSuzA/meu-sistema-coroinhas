@@ -273,144 +273,131 @@ export function renderAgenda(container, { user }) {
               ? `<div class="text-center py-8 text-[#8D6E63] text-sm">Nenhum compromisso registrado para este período.</div>`
               : displayedItems
                   .map((it) => {
-                    // 1. Card em DESTAQUE FORTE: Usuário (ou irmão da Conta Familiar) ESTÁ ESCALADO
-                    if (it.isPersonalSchedule) {
-                      const famEntries = isFam && Array.isArray(it.familyEntries) && it.familyEntries.length > 0
+                    const isPersonal = Boolean(it.isPersonalSchedule);
+                    const isEvt = it.sourceType === 'event';
+                    const famEntries =
+                      isPersonal && isFam && Array.isArray(it.familyEntries) && it.familyEntries.length > 0
                         ? it.familyEntries
                         : null;
 
-                      if (famEntries) {
-                        return `
-                          <article class="rounded-2xl border-2 border-[#D97706] bg-gradient-to-r from-[#3E2723] via-[#4E342E] to-[#5D4037] text-white p-4 sm:p-5 shadow-md space-y-3">
-                            <div class="space-y-1.5">
-                              <div class="flex items-center gap-2 flex-wrap">
-                                <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-amber-400 text-[#2B1B18] shadow-xs">
-                                  <i data-lucide="star" class="w-3.5 h-3.5"></i>
-                                  Escala da Família
-                                </span>
-                                <span class="text-xs font-extrabold text-amber-200 bg-white/10 px-2.5 py-0.5 rounded-lg border border-amber-300/30">
-                                  ${escapeHtml(formatDateBR(it.date))} • ${escapeHtml(it.time)}
-                                </span>
-                                ${
-                                  it.hasConflict
-                                    ? `<span class="inline-flex items-center gap-1 text-[11px] font-bold text-[#2B1B18] bg-amber-300 px-2 py-0.5 rounded-full">
-                                        <i data-lucide="clock-alert" class="w-3 h-3"></i>
-                                        Conflito de horário
-                                      </span>`
-                                    : ''
-                                }
-                              </div>
-                              <h5 class="text-base font-extrabold text-white">${escapeHtml(it.title)}</h5>
-                              <p class="text-xs text-amber-100/85 flex items-center gap-2 flex-wrap">
-                                <span class="capitalize font-semibold">${escapeHtml(formatWeekdayBR(it.date))}</span>
-                                <span>•</span>
-                                <span>${escapeHtml(it.location)}</span>
-                              </p>
-                            </div>
+                    const cardClass = isPersonal
+                      ? 'agenda-program-card-personal'
+                      : isEvt
+                        ? 'agenda-program-card-event'
+                        : 'agenda-program-card-mass';
 
-                            <div class="flex flex-col sm:flex-row sm:flex-wrap gap-2 pt-2 border-t border-white/15">
-                              ${famEntries
-                                .map(
-                                  (entry) => `
-                                <div class="inline-flex items-center gap-2 flex-wrap bg-white/95 text-[#3E2723] rounded-xl px-3 py-1.5 shadow-2xs">
-                                  ${renderFamilyMemberPill(user, entry.memberId, { compact: true, fallbackName: entry.memberName })}
-                                  ${renderPastoralPill(entry.pastoral, { compact: true })}
-                                  <span class="text-xs font-extrabold text-[#4E342E]">${escapeHtml(entry.roleName)}</span>
-                                </div>
-                              `,
-                                )
-                                .join('')}
-                            </div>
-                          </article>
-                        `;
-                      }
+                    // Linha 1 — Pílulas de pastoral deduplicadas
+                    let pastoralBadges = '';
+                    if (famEntries) {
+                      const uniqPids = Array.from(new Set(famEntries.map((e) => e.pastoralId).filter(Boolean)));
+                      pastoralBadges =
+                        uniqPids.length > 0
+                          ? uniqPids.map((pid) => renderPastoralPill(pastoralMap[pid], { compact: true })).join('')
+                          : renderPastoralPill(it.pastoral, { compact: true });
+                    } else if (Array.isArray(it.pastoralIds) && it.pastoralIds.length > 0) {
+                      pastoralBadges = it.pastoralIds
+                        .map((pid) => renderPastoralPill(pastoralMap[pid], { compact: true }))
+                        .join('');
+                    } else {
+                      pastoralBadges = renderPastoralPill(it.pastoral, { compact: true });
+                    }
 
-                      return `
-                        <article class="rounded-2xl border-2 border-[#D97706] bg-gradient-to-r from-[#3E2723] via-[#4E342E] to-[#5D4037] text-white p-4 sm:p-5 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                          <div class="space-y-2">
-                            <div class="flex items-center gap-2 flex-wrap">
-                              <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-amber-400 text-[#2B1B18] shadow-xs">
-                                <i data-lucide="star" class="w-3.5 h-3.5"></i>
-                                ${escapeHtml(it.eventType)}
-                              </span>
-                              <span class="text-xs font-extrabold text-amber-200 bg-white/10 px-2.5 py-0.5 rounded-lg border border-amber-300/30">
-                                ${escapeHtml(formatDateBR(it.date))} • ${escapeHtml(it.time)}
-                              </span>
+                    // Linha 1 — Pílula de categoria/status alinhada
+                    const categoryPill = isPersonal
+                      ? `<span class="agenda-status-personal inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2.5 py-0.5 rounded-full">★ ${
+                          famEntries || isFam ? 'Escala da Família' : 'Sua Escala'
+                        }</span>`
+                      : isEvt
+                        ? `<span class="agenda-event-badge inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2.5 py-0.5 rounded-full">🟠 ${escapeHtml(
+                            it.eventType || 'Evento',
+                          )}</span>`
+                        : `<span class="inline-flex items-center text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-[#F5EFE6] text-[#6D4C41] border border-[#E7E0D6]">Missa da Pastoral</span>`;
+
+                    // Linha 2 — Título padronizado: [Nome da Celebração ou Evento] • [Local]
+                    const baseName = String(it.title || '').split(' • ')[0].trim();
+                    const standardizedTitle = it.location
+                      ? `${baseName} • ${it.location}`
+                      : baseName;
+
+                    // Linha 3 — Escalados (quando houver) e observação real (sem texto repetitivo)
+                    let assignedPillsHtml = '';
+                    if (famEntries) {
+                      assignedPillsHtml = famEntries
+                        .map(
+                          (entry) => `
+                            <span class="agenda-assigned-chip inline-flex items-center gap-1.5 flex-wrap">
+                              ${renderFamilyMemberPill(user, entry.memberId, { compact: true, fallbackName: entry.memberName })}
                               ${
-                                it.pastoral
-                                  ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-white/15 text-amber-100 border border-white/20">
-                                      ${escapeHtml(it.pastoral.shortName)}
-                                    </span>`
+                                entry.pastoral?.shortName
+                                  ? `<span class="text-[11px] font-semibold text-[#6D4C41]">• ${escapeHtml(entry.pastoral.shortName)}</span>`
                                   : ''
                               }
-                              ${
-                                it.hasConflict
-                                  ? `<span class="inline-flex items-center gap-1 text-[11px] font-bold text-[#2B1B18] bg-amber-300 px-2 py-0.5 rounded-full">
-                                      <i data-lucide="clock-alert" class="w-3 h-3"></i>
-                                      Conflito de horário
-                                    </span>`
-                                  : ''
-                              }
-                            </div>
-                            <h5 class="text-base font-extrabold text-white">${escapeHtml(it.title)}</h5>
-                            <p class="text-xs text-amber-100/85 flex items-center gap-2 flex-wrap">
-                              <span class="capitalize font-semibold">${escapeHtml(formatWeekdayBR(it.date))}</span>
-                              <span>•</span>
-                              <span>${escapeHtml(it.location)}</span>
-                              ${it.description ? `<span>•</span><span>${escapeHtml(it.description)}</span>` : ''}
-                            </p>
-                          </div>
-                        </article>
+                              <span class="text-[11px] font-bold text-[#3E2723]">• ${escapeHtml(entry.roleName)}</span>
+                            </span>
+                          `,
+                        )
+                        .join('');
+                    } else if (isPersonal) {
+                      const memberDisplay = it.assignedMemberName || user.name;
+                      assignedPillsHtml = `
+                        <span class="agenda-assigned-chip inline-flex items-center gap-1.5 flex-wrap px-2.5 py-0.5">
+                          <span class="text-[11px] font-extrabold text-[#78350F]">${escapeHtml(memberDisplay)}</span>
+                          ${
+                            it.pastoral?.shortName
+                              ? `<span class="text-[11px] font-semibold text-[#6D4C41]">• ${escapeHtml(it.pastoral.shortName)}</span>`
+                              : ''
+                          }
+                          ${
+                            it.roleNames
+                              ? `<span class="text-[11px] font-bold text-[#3E2723]">• ${escapeHtml(it.roleNames)}</span>`
+                              : ''
+                          }
+                        </span>
                       `;
                     }
 
-                    // 2. Card DISCRETO: Missa da Pastoral (usuário NÃO está escalado) ou Evento/Ensaio
-                    const isEvt = it.sourceType === 'event';
-                    const pastoralBadges = Array.isArray(it.pastoralIds) && it.pastoralIds.length > 0
-                      ? it.pastoralIds.map((pid) => renderPastoralPill(pastoralMap[pid], { compact: true })).join('')
-                      : renderPastoralPill(it.pastoral, { compact: true });
+                    const cleanNotes =
+                      isEvt && it.description
+                        ? `<span class="text-[#8D6E63]">•</span><span class="text-[#6D4C41]">${escapeHtml(it.description)}</span>`
+                        : '';
 
                     return `
-                      <article class="rounded-xl ${
-                        isEvt ? 'agenda-event-card shadow-xs' : 'border border-[#E6DACE] bg-[#FDFBF7]/90'
-                      } p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div class="space-y-1.5">
-                          <div class="flex items-center gap-2 flex-wrap">
-                            <span class="text-xs font-bold ${
-                              isEvt
-                                ? 'text-[#78350F] bg-white/95 border border-[#F59E0B]'
-                                : 'text-[#4E342E] bg-white border border-[#E6DACE]'
-                            } px-2.5 py-0.5 rounded-lg">
+                      <article class="agenda-program-card ${cardClass} rounded-xl p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition">
+                        <div class="space-y-1.5 min-w-0 flex-1">
+                          <!-- Linha 1: Data/Hora + Pastoral + Categoria/Status -->
+                          <div class="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                            <span class="text-xs font-bold text-[#4E342E] bg-white px-2.5 py-0.5 rounded-lg border border-[#E7E0D6]">
                               ${escapeHtml(formatDateBR(it.date))} • ${escapeHtml(it.time)}
                             </span>
                             ${pastoralBadges}
-                            <span class="text-[10px] uppercase tracking-wider px-2.5 py-0.5 rounded-full ${
-                              isEvt
-                                ? 'agenda-event-badge'
-                                : 'font-bold bg-[#F5EFE6] text-[#6D4C41] border border-[#E6DACE]'
-                            }">
-                              ${escapeHtml(it.eventType)}
-                            </span>
+                            ${categoryPill}
+                            ${
+                              it.hasConflict
+                                ? `<span class="inline-flex items-center gap-1 text-[10px] font-bold text-[#78350F] bg-amber-200 border border-amber-400 px-2 py-0.5 rounded-full">
+                                    <i data-lucide="clock-alert" class="w-3 h-3"></i>
+                                    Conflito
+                                  </span>`
+                                : ''
+                            }
                           </div>
-                          ${
-                            isEvt
-                              ? `<h5 class="text-sm font-extrabold text-[#78350F]">
-                                  ${escapeHtml(it.time)} — ${escapeHtml(it.title)} <span class="font-bold text-[#92400E]">• ${escapeHtml(it.location)}</span>
-                                </h5>`
-                              : `<h5 class="text-sm font-bold text-[#4E342E]">
-                                  ${escapeHtml(it.time)} • ${escapeHtml(it.location)}${it.pastoralLabels ? ` (${escapeHtml(it.pastoralLabels)})` : ''} — <span class="font-semibold text-[#6D4C41]">${escapeHtml(it.title.split(' • ')[0])}</span>
-                                </h5>`
-                          }
-                          <p class="text-xs ${isEvt ? 'text-[#92400E] font-medium' : 'text-[#8D6E63]'} flex items-center gap-2 flex-wrap">
-                            <span class="capitalize">${escapeHtml(formatWeekdayBR(it.date))}</span>
-                            ${it.description ? `<span>•</span><span>${escapeHtml(it.description)}</span>` : ''}
-                          </p>
+
+                          <!-- Linha 2: Título Padronizado -->
+                          <h5 class="text-sm sm:text-[15px] font-extrabold text-[#3E2723] leading-snug">
+                            ${escapeHtml(standardizedTitle)}
+                          </h5>
+
+                          <!-- Linha 3: Dia da Semana + Escalados (ou observação do evento) -->
+                          <div class="text-xs text-[#6D4C41] flex items-center gap-2 flex-wrap">
+                            <span class="capitalize font-semibold text-[#785A4E]">${escapeHtml(formatWeekdayBR(it.date))}</span>
+                            ${assignedPillsHtml}
+                            ${cleanNotes}
+                          </div>
                         </div>
 
                         ${
                           it.canEdit && isEvt
                             ? `
-                          <div class="flex items-center gap-1 shrink-0">
+                          <div class="flex items-center gap-1 shrink-0 self-end sm:self-center">
                             <button type="button" data-edit-event="${it.sourceId}" class="p-2 rounded-lg text-[#78350F] hover:text-[#3E2723] hover:bg-white/80 transition" title="Editar evento">
                               <i data-lucide="pencil" class="w-4 h-4"></i>
                             </button>

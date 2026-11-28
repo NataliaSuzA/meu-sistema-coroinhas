@@ -749,7 +749,7 @@ export function buildSyncedAgendaItems(user, { schedules, events, roles, pastora
           pastoralIds: matchingPastoralIds,
           pastoralLabels: labels,
           eventType: 'Missa da Pastoral',
-          description: sch.notes || `Escala ativa de ${labels || 'sua pastoral'} (você não está escalado neste horário)`,
+          description: sch.notes || '',
           hasSubRequest: false,
           hasConflict: false,
         });

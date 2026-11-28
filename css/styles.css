@@ -267,6 +267,38 @@ body {
   font-weight: 700;
 }
 
+/* Padronização Harmônica dos Cards da Programação Mensal (Agenda) */
+.agenda-program-card-mass {
+  background-color: #FFFFFF;
+  border: 1px solid #E7E0D6;
+}
+
+.agenda-program-card-personal {
+  background-color: #FFFDF7;
+  border: 1px solid #F59E0B;
+  border-left: 4px solid #B45309;
+}
+
+.agenda-program-card-event {
+  background-color: #FFFBEB;
+  border: 1px solid #FCD34D;
+  border-left: 4px solid #D97706;
+}
+
+.agenda-status-personal {
+  background-color: #FEF3C7;
+  color: #78350F;
+  border: 1px solid #F59E0B;
+  font-weight: 700;
+}
+
+.agenda-assigned-chip {
+  background-color: #FFFFFF;
+  border: 1px solid #E7E0D6;
+  border-radius: 9999px;
+  padding: 0.15rem 0.55rem 0.15rem 0.2rem;
+}
+
 /* Lista compacta de Oportunidades para Servir no Início (Mobile) */
 @media (max-width: 767px) {
   .dashboard-vacancy-grid {
